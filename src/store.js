@@ -104,7 +104,7 @@ export async function listSets() {
 }
 
 const START = { provider: 'claude', model: 'sonnet', effort: '' };
-const DEFAULTS = { write: START, grade: START, tutor: START };
+const DEFAULTS = { write: START, grade: START, tutor: { ...START, effort: 'medium' } };
 export async function readSettings() {
   try {
     return checkSettings(await readJson(path.join(home(), 'settings.json')));

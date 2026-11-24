@@ -43,7 +43,7 @@ export function Analysis({ problem, at, analyze, reload }) {
       )}
       {visual?.status === 'working' && (
         <p class="row second">
-          <Icon name="load" /> {visual.step}. This can take a minute or two.
+          <Icon name="load" /> {visual.step}. This can take a few minutes, and you can keep working.
         </p>
       )}
       {visual?.status === 'failed' && (
