@@ -14,7 +14,10 @@ You need macOS, Node 22 or newer, Python 3, and at least one of:
 C++ also needs Apple's compiler, from `xcode-select --install`.
 
 ```sh
-npm install -g github:chewton2k/interview-buddy
+git clone https://github.com/chewton2k/interview-buddy
+cd interview-buddy
+npm install
+npm link
 interview-buddy
 ```
 
