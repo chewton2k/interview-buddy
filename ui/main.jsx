@@ -24,6 +24,7 @@ function App() {
   useEffect(() => {
     const go = () => setHash(location.hash);
     addEventListener('hashchange', go);
+    go();
     return () => removeEventListener('hashchange', go);
   }, []);
   useEffect(() => {

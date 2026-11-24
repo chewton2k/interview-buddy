@@ -28,6 +28,7 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
+body { overflow-x: clip; }
 body { background: var(--bg); color: var(--text); font: 400 16px/24px var(--sans); -webkit-font-smoothing: antialiased; }
 #app { min-height: 100%; display: flex; flex-direction: column; }
 main:focus { outline: none; }
@@ -186,6 +187,7 @@ math-field::part(menu-toggle), math-field::part(virtual-keyboard-toggle) { color
 math-field:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
 .group { display: grid; gap: 4px; }
 .work.interface { grid-template-rows: auto minmax(200px, 5fr) minmax(240px, 6fr); }
+.offstage { position: absolute; left: -4000px; top: 0; width: 1000px; height: 700px; border: 0; }
 .preview-frame { width: 100%; height: 280px; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; resize: vertical; }
 .canvas .excalidraw { --color-primary: var(--ink); --color-primary-darker: var(--ink); --color-primary-darkest: var(--ink); --color-primary-hover: var(--ink-hover); --color-primary-light: var(--raised); --color-primary-light-darker: var(--line); --color-surface-primary-container: var(--raised); --color-on-primary-container: var(--text); --color-surface-low: var(--raised); --color-brand-hover: var(--ink-hover); --color-brand-active: var(--ink); --color-selection: var(--focus); --color-surface-high: var(--raised); }
 .canvas .excalidraw .default-sidebar-trigger, .canvas .excalidraw .sidebar-trigger { display: none; }

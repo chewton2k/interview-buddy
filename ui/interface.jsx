@@ -2,48 +2,72 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { Editor } from './editor.jsx';
 import { api, Icon, Problem, useAction, useDebounced } from './lib.jsx';
 
-function Frame({ run, hidden, onDone }) {
-  const frame = useRef();
-  const done = useRef(onDone);
-  done.current = onDone;
-  useEffect(() => {
-    const listen = (e) => {
-      if (e.source !== frame.current?.contentWindow) return;
-      if (e.data?.preview === 'hello') frame.current.contentWindow.postMessage({ html: run.html, checks: run.checks }, '*');
-      if (e.data?.preview === 'done') done.current(e.data);
+const ALLOW = { sandbox: 'allow-scripts allow-forms', allow: 'focus-without-user-activation *' };
+
+/** Loads a page in a locked frame. The listener is in place before the frame can speak. */
+function open(frame, html, checks, onDone) {
+  const listen = (e) => {
+    if (e.source !== frame.contentWindow) return;
+    if (e.data?.preview === 'hello') frame.contentWindow.postMessage({ html, checks }, '*');
+    if (e.data?.preview === 'done') onDone(e.data.results);
+  };
+  addEventListener('message', listen);
+  frame.src = '/preview.html';
+  return () => removeEventListener('message', listen);
+}
+
+// Every check gets its own fresh page, so one cannot spoil the next.
+const runCheck = (html, check) =>
+  new Promise((resolve) => {
+    const frame = document.createElement('iframe');
+    Object.entries(ALLOW).forEach(([k, v]) => frame.setAttribute(k, v));
+    Object.assign(frame, { className: 'offstage', tabIndex: -1, title: 'Running a check' });
+    frame.setAttribute('aria-hidden', 'true');
+    const finish = (result) => {
+      clearTimeout(timer);
+      close();
+      frame.remove();
+      resolve(result);
     };
-    addEventListener('message', listen);
-    return () => removeEventListener('message', listen);
-  }, []);
-  return <iframe ref={frame} title={hidden ? 'Checking the tests' : 'Preview'} class={hidden ? 'sr' : 'preview-frame'} aria-hidden={hidden || undefined} tabIndex={hidden ? -1 : 0} sandbox="allow-scripts allow-forms" src="/preview.html" />;
+    const timer = setTimeout(() => finish({ name: check.name, ok: false, error: 'The page did not finish loading' }), 8000);
+    document.body.append(frame);
+    const close = open(frame, html, [check], ([r]) => finish(r));
+  });
+const runChecks = (html, checks) => Promise.all(checks.map((c) => runCheck(html, c)));
+
+function Preview({ html }) {
+  const frame = useRef();
+  useEffect(() => open(frame.current, html, [], () => {}), [html]);
+  return <iframe ref={frame} title="Preview" class="preview-frame" {...ALLOW} />;
 }
 
 /** Build an interface in HTML with a live preview and tests that run in the page. */
 export function InterfaceWork({ problem, at, work, analyze, Feedback }) {
   const { body, draft } = problem;
   const [html, setHtml] = useState(draft.code?.html ?? body.starter);
-  const [run, setRun] = useState({ n: 0, html, checks: [] });
+  const [live, setLive] = useState(html);
   const [tests, setTests] = useState(null);
   const [shown, setShown] = useState(null);
   const [feedback, setFeedback] = useState(problem.feedback);
   const [resets, setResets] = useState(0);
   const save = useDebounced((d) => api('PUT', `${at}/draft`, d).catch(() => {}), 600);
-  const refresh = useDebounced((h) => setRun((r) => ({ n: r.n + 1, html: h, checks: [] })), 500);
+  const refresh = useDebounced(setLive, 500);
+  // A check that fails on the reference solution is a bad check, so it is never shown.
+  useEffect(() => {
+    let gone = false;
+    runChecks(body.solutionCode, body.checks).then((r) => gone || setTests(body.checks.filter((_, i) => r[i].ok)));
+    return () => (gone = true);
+  }, []);
   const change = (h) => {
     setHtml(h);
     save({ language: 'html', code: { html: h } });
     refresh(h);
   };
-  const submit = () => {
-    setShown('running');
-    setRun({ n: run.n + 1, html, checks: tests });
-  };
-  const record = useAction((r) => api('POST', `${at}/checked`, { passed: r.filter((x) => x.ok).length, total: r.length }));
-  const done = ({ results }) => {
-    if (!run.checks.length) return;
+  const submit = useAction(async () => {
+    const results = await runChecks(html, tests);
     setShown({ html, results });
-    record.run(results);
-  };
+    await api('POST', `${at}/checked`, { passed: results.filter((r) => r.ok).length, total: results.length });
+  });
   const passed = shown?.results?.filter((r) => r.ok).length;
   const outcome = shown?.results && shown.html === html ? `${passed} of ${shown.results.length} checks pass` : '';
   work.current = () => ({ language: 'html', code: html, outcome });
@@ -63,16 +87,15 @@ export function InterfaceWork({ problem, at, work, analyze, Feedback }) {
           Reset
         </button>
         <span class="grow" />
-        <button class="btn primary" disabled={!tests?.length || shown === 'running'} onClick={submit}>Submit</button>
+        <button class="btn primary" disabled={!tests?.length || submit.busy} onClick={() => submit.run()}>Submit</button>
       </div>
-      <Editor key={resets} language="html" value={html} onChange={change} onRun={submit} />
+      <Editor key={resets} language="html" value={html} onChange={change} onRun={() => tests?.length && !submit.busy && submit.run()} />
       <div class="results">
         <div class="stack">
-          <Frame key={run.n} run={run} onDone={done} />
-          {!tests && <Frame hidden run={{ html: body.solutionCode, checks: body.checks }} onDone={({ results }) => setTests(body.checks.filter((_, i) => results[i]?.ok))} />}
-          <Problem>{ask.error || record.error}</Problem>
+          <Preview html={live} />
+          <Problem>{ask.error || submit.error}</Problem>
           <div class="row between wrap" aria-live="polite">
-            {shown === 'running' ? (
+            {submit.busy ? (
               <p class="row second"><Icon name="load" /> Running the checks</p>
             ) : shown ? (
               <h3 class={passed === shown.results.length ? 'good' : 'bad'}>{passed} of {shown.results.length} checks pass</h3>

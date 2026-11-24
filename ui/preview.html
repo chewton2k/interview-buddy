@@ -22,7 +22,18 @@
           const need = (s) => { const n = typeof s === 'string' ? $(s) : s; assert(n, 'Nothing matches ' + s); return n; };
           const click = async (s) => { need(s).click(); await wait(); };
           const type = async (s, text) => { const n = need(s); n.focus(); n.value = text; n.dispatchEvent(new Event('input', { bubbles: true })); n.dispatchEvent(new Event('change', { bubbles: true })); await wait(); };
-          const press = async (s, key) => { need(s).dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); await wait(); };`;
+          const press = async (s, name) => {
+            const n = need(s);
+            const key = name === 'Space' ? ' ' : name;
+            n.focus();
+            const send = (type) => n.dispatchEvent(new KeyboardEvent(type, { key, bubbles: true, cancelable: true }));
+            const go = send('keydown');
+            const acts = n.matches('button, summary, [type=button], [type=submit]') || (key === ' ' ? n.matches('[type=checkbox], [type=radio]') : n.matches('a[href]'));
+            if (go && (key === 'Enter' || key === ' ') && acts) n.click();
+            if (go && key === 'Enter' && n.form && n.matches('input')) n.form.requestSubmit();
+            send('keyup');
+            await wait();
+          };`;
         const runner = `addEventListener('load', async () => {${tools}
           await wait(100);
           const results = [];

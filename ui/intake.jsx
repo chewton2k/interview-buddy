@@ -61,7 +61,7 @@ export function Intake() {
           </div>
           <div class="field">
             <label for="rounds">What the interview has</label>
-            <textarea id="rounds" class="input" rows={5} maxLength={6000} placeholder="Rounds, topics the recruiter named, what you feel rusty on" value={form.rounds} onInput={set('rounds')} />
+            <textarea id="rounds" class="input" rows={3} maxLength={6000} placeholder="Rounds, topics the recruiter named, what you feel rusty on" value={form.rounds} onInput={set('rounds')} />
           </div>
           <fieldset class="field">
             <legend>Subjects</legend>

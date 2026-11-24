@@ -1,6 +1,15 @@
 import fs from 'node:fs';
 if (!fs.existsSync('ui/main.jsx')) process.exit(0);
 const { build } = await import('esbuild');
+// The canvas lists a font CDN as a second source. The page policy blocks it anyway, so it is dropped to keep the console clean.
+const localFonts = {
+  name: 'local-fonts',
+  setup: (b) =>
+    b.onLoad({ filter: /@excalidraw\/excalidraw\/dist\/prod\/.*\.js$/ }, ({ path }) => ({
+      contents: fs.readFileSync(path, 'utf8').replace(/return (\w+)\.push\(new URL\(\w+,\w+\.ASSETS_FALLBACK_URL\)\),\1\}/, 'return $1}'),
+      loader: 'js',
+    })),
+};
 fs.rmSync('dist', { recursive: true, force: true });
 await build({
   entryPoints: { app: 'ui/main.jsx', style: 'ui/style.css', canvas: 'node_modules/@excalidraw/excalidraw/dist/prod/index.css' },
@@ -12,6 +21,7 @@ await build({
   define: { 'process.env.NODE_ENV': '"production"', 'process.env.IS_PREACT': '"false"' },
   conditions: ['production'],
   target: 'safari17',
+  plugins: [localFonts],
   outdir: 'dist',
   jsx: 'automatic',
   jsxImportSource: 'preact',
