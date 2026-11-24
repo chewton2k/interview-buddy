@@ -241,7 +241,7 @@ math-field:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; 
 .canvas .excalidraw .default-sidebar-trigger, .canvas .excalidraw .sidebar-trigger { display: none; }
 /* Delete and the other actions come first, so a short canvas never hides them. */
 .canvas .App-menu__left fieldset:has([aria-label="Delete"]) { order: -1; }
-.canvas .HintViewer { color: var(--muted); }
+.canvas .HintViewer > span { color: var(--muted); }
 .draw { display: grid; gap: 8px; }
 .canvas { height: max(420px, calc(100vh - 360px)); border: 1px solid var(--line-strong); border-radius: 12px; overflow: hidden; }
 .work.plain > .stack:has(.draw) { max-width: none; }
