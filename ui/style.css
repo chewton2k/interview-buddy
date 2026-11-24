@@ -4,7 +4,7 @@
 
 :root, .canvas {
   color-scheme: light;
-  --bg: #f4f4f5; --card: #ffffff; --raised: #f4f4f5; --well: #fafafa; --frame: #e3e5e9; --code-bg: #ffffff; --code-line: #f5f6f8; --code-select: #add6ff;
+  --bg: #f4f4f5; --card: #ffffff; --raised: #f4f4f5; --well: #fafafa; --frame: #e3e5e9; --code-bg: #ffffff; --code-line: #eef0f4; --code-select: #add6ff;
   --text: #171717; --second: #525252; --muted: #696969; --line: rgb(23 23 23 / 0.1); --line-strong: rgb(23 23 23 / 0.5);
   --ink: #171717; --on-ink: #ffffff; --ink-hover: #333333;
   --mark: #ffe45c; --mark-text: #171717; --mark-soft: #fff3b0;
@@ -17,8 +17,8 @@
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #1e2126; --card: #282c32; --raised: #3a3f47; --well: #23272c; --frame: #363a40; --code-bg: #1e2126; --code-line: #262a31; --code-select: #264f78;
-  --text: #f1f2f4; --second: #bcc2cb; --muted: #a3aab5; --line: rgb(237 240 245 / 0.12); --line-strong: rgb(237 240 245 / 0.45);
+  --bg: #1e2126; --card: #282c32; --raised: #3a3f47; --well: #23272c; --frame: #363a40; --code-bg: #1e2126; --code-line: #2c313a; --code-select: #264f78;
+  --text: #f1f2f4; --second: #bcc2cb; --muted: #a3aab5; --line: rgb(237 240 245 / 0.16); --line-strong: rgb(237 240 245 / 0.45);
   --ink: #ededed; --on-ink: #171717; --ink-hover: #ffffff;
   --mark: #f2d64b; --mark-text: #171717; --mark-soft: #574d18;
   --good: #34d578; --bad: #ff8a8d; --focus: #8ab4ff;
@@ -119,18 +119,20 @@ a.item:hover, .over .item { background: var(--well); }
 .count { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 #app:has(.pad) > .top { display: none; }
-.pad { display: grid; grid-template: auto minmax(0, 1fr) / var(--left) 8px minmax(280px, 1fr) 8px var(--right); height: 100vh; padding: 0 8px 8px; background: var(--frame); }
+.pad { display: grid; grid-template: auto minmax(0, 1fr) / var(--left) 8px minmax(280px, 1fr) 8px var(--right); height: 100dvh; padding: 0 8px 8px; background: var(--frame); }
 .pad.analysis { grid-template-columns: var(--left) 8px minmax(280px, 1fr) 8px min(var(--right), 340px); }
 .padbar { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 16px; padding: 8px 4px 8px 8px; }
 .padbar > :last-child { justify-self: end; }
+.padbar .back { min-width: 0; overflow: hidden; white-space: nowrap; }
+.padpanel > .row { min-height: 36px; }
 .padbar .input, .padtabs .input { width: auto; min-height: 36px; padding: 4px 32px 4px 12px; font-size: 14px; }
 .clock { display: flex; align-items: center; gap: 8px; font-size: 14px; font-variant-numeric: tabular-nums; }
 .clock b { font: 500 20px/28px var(--mono); padding: 0 8px; }
 .padside, .padedit, .padpanel, .padright .chat { border-radius: 10px; }
-.padedit { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; background: var(--code-bg); }
+.padedit { display: grid; grid-template: auto minmax(0, 1fr) / minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; background: var(--code-bg); }
 .padtabs { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 16px; border-bottom: 1px solid var(--line); }
 .padtabs .grow { flex: 1; }
-.padtabs .mono { font-size: 14px; }
+.padtabs .mono { font-size: 14px; min-width: 0; overflow: hidden; }
 .presence { display: flex; align-items: center; gap: 8px; font-size: 14px; line-height: 20px; color: var(--second); }
 .presence i { width: 8px; height: 8px; border-radius: 50%; background: var(--good); }
 .presence.typing i { background: var(--mark); }
@@ -239,6 +241,7 @@ math-field:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; 
 .canvas .excalidraw .default-sidebar-trigger, .canvas .excalidraw .sidebar-trigger { display: none; }
 /* Delete and the other actions come first, so a short canvas never hides them. */
 .canvas .App-menu__left fieldset:has([aria-label="Delete"]) { order: -1; }
+.canvas .HintViewer { color: var(--muted); }
 .draw { display: grid; gap: 8px; }
 .canvas { height: max(420px, calc(100vh - 360px)); border: 1px solid var(--line-strong); border-radius: 12px; overflow: hidden; }
 .work.plain > .stack:has(.draw) { max-width: none; }
@@ -270,7 +273,8 @@ math-field:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; 
   .page { padding: 24px 16px; }
   .desk, .bench, .bench.asking, .bench.analysis, .bench.asking.analysis, .pair { grid-template-columns: minmax(0, 1fr); }
   .pad { display: flex; flex-direction: column; gap: 8px; height: auto; min-height: 100vh; }
-  .padbar { display: flex; flex-wrap: wrap; justify-content: space-between; padding: 8px 8px 0; gap: 8px; }
+  .padbar { display: flex; flex-wrap: wrap; padding: 8px 8px 0; gap: 8px; }
+  .padbar > :last-child { margin-left: auto; }
   .splitter { display: none; }
   .padedit { height: 480px; }
   .padright { display: flex; flex-direction: column; }

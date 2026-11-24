@@ -28,11 +28,11 @@ export async function mount(host, { elements, onChange }) {
   const root = createRoot(host);
   let canvas;
   // A shape without a fill can only be picked by its edge, so a click inside it picks it here, after the canvas has handled the click.
-  const pickInside = (tool, { origin, drag }) => {
-    if (tool.type !== 'selection' || drag.hasOccurred) return;
+  const pickInside = (tool, { origin, drag }, { shiftKey }) => {
+    if (tool.type !== 'selection' || drag.hasOccurred || shiftKey) return;
     setTimeout(() => {
-      const { selectedElementIds, editingTextElement } = canvas.getAppState();
-      const shape = !editingTextElement && !Object.keys(selectedElementIds).length && shapeAt(canvas.getSceneElements(), origin);
+      const { selectedElementIds, editingTextElement, editingGroupId } = canvas.getAppState();
+      const shape = !editingTextElement && !editingGroupId && !Object.keys(selectedElementIds).length && shapeAt(canvas.getSceneElements(), origin);
       if (!shape) return;
       const group = shape.groupIds.at(-1);
       const picked = group ? canvas.getSceneElements().filter((e) => e.groupIds.includes(group)) : [shape];
@@ -43,8 +43,10 @@ export async function mount(host, { elements, onChange }) {
     <Excalidraw
       initialData={{ elements, scrollToContent: true, appState: { viewBackgroundColor: '#f7f7f4', currentItemFontFamily: 2, currentItemRoughness: 0 } }}
       theme="light"
-      excalidrawAPI={(api) => (canvas = api)}
-      onPointerUp={pickInside}
+      excalidrawAPI={(api) => {
+        canvas = api;
+        api.onPointerUp(pickInside);
+      }}
       autoFocus={false}
       UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, export: false, toggleTheme: false }, tools: { image: false } }}
       onChange={(list) => onChange(list.filter((e) => !e.isDeleted))}

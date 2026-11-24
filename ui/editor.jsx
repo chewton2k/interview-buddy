@@ -73,7 +73,6 @@ export function Editor({ language, value, onChange, onRun, readOnly }) {
           syntaxHighlighting(style),
           brackets,
           readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [],
-          EditorView.lineWrapping,
           EditorView.contentAttributes.of({ 'aria-label': readOnly ? 'Solution code' : 'Code editor. Press Escape then Tab to leave.' }),
           EditorView.updateListener.of((u) => u.docChanged && latest.current.onChange(u.state.doc.toString())),
         ],
