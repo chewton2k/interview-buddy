@@ -183,5 +183,6 @@ test('number parsing and checking', () => {
 
 test('quotes are matched across case and line breaks and returned as written', () => {
   assert.equal(findQuote('We Want\n  clean code (always)', 'want clean code (always)'), 'Want\n  clean code (always)');
+  assert.equal(findQuote('We expect calm reasoning.', '"expect calm reasoning."'), 'expect calm reasoning');
   for (const q of ['one', '', 'a '.repeat(30), 'not there']) assert.equal(findQuote('some text here', q), null);
 });

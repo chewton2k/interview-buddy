@@ -128,7 +128,8 @@ test('model test reports success and the raw failure', async () => {
 test('status and options', async () => {
   const s = (await call('GET', '/api/status')).json;
   assert.equal(s.sandbox.ok, true, s.sandbox.detail);
-  assert.ok(s.languages.python && s.languages.cpp && s.providers.length === 2);
+  for (const v of Object.values(s.languages)) assert.match(v, /^\d+\./);
+  assert.equal(s.providers.length, 2);
   assert.equal((await call('GET', '/api/options')).json.subjects.length, 6);
 });
 

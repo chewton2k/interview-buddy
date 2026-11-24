@@ -21,7 +21,7 @@ export function checkNumber(text, { answer, tolerance, unit }) {
 
 /** Finds a quote in the text ignoring case and line wrapping, and returns the words exactly as they appear. */
 export function findQuote(text, quote) {
-  const words = String(quote).trim().split(/\s+/).filter(Boolean);
+  const words = String(quote).replace(/^[\s"'.,;:]+|[\s"'.,;:]+$/g, '').split(/\s+/).filter(Boolean);
   if (words.length < 2 || words.length > 25) return null;
   const pattern = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
   return text.match(new RegExp(pattern, 'i'))?.[0] ?? null;

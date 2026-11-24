@@ -49,7 +49,7 @@ const planPrompt = (intake) => `Plan a practice set of exactly ${intake.count} p
 Use every listed subject at least once and no other subject. Match the level, the company's domain and what the rounds test. Order from easier to harder, and vary the topics.
 kind is "code" for a function the candidate writes and runs against tests, "numeric" for one number as the answer, "written" for design, derivation or explanation that a rubric grades. Prefer code for coding subjects and numeric for quant, math, physics, chemistry and circuits. Use written where an interviewer would want the reasoning.
 quote must be 3 to 15 consecutive words copied exactly from "posting" or "rounds" that the problem trains. Prefer a different quote for each problem. Use an empty string only when nothing fits.
-topic is one sentence telling the author what to write. title is at most 8 words.
+topic is one sentence telling the author what to write. title is at most 8 words in sentence case.
 ${data(intake)}`;
 
 const rules = {

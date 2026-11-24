@@ -69,7 +69,7 @@ const routes = [
   ['GET', /^\/api\/settings$/, async () => ({ settings: await readSettings() })],
   ['GET', /^\/api\/status$/, async () => {
     const [providers, sandbox, found] = await Promise.all([providerStatus(), selfTest(), tools()]);
-    return { providers, sandbox, languages: { python: found.python?.version, javascript: found.javascript.version, cpp: found.cpp } };
+    return { providers, sandbox, languages: { python: found.python?.version, javascript: found.javascript.version, cpp: found.cpp?.version } };
   }],
   ['PUT', /^\/api\/settings$/, async (_, body) => ({ settings: await saveSettings(body) })],
   ['POST', /^\/api\/settings\/test$/, async (_, body) => {
