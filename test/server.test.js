@@ -88,6 +88,8 @@ test('the pad runs the file, keeps tests the user wrote and times the interview'
   assert.deepEqual([wrong.expected, wrong.reference], [11, 10]);
   for (const bad of [{ args: ['x'] }, { args: ['1.5'] }, { args: [] }, { args: ['1', '2'] }, { args: 'x' }, { args: ['1'], expected: '"a"' }, { args: [5] }]) assert.equal((await call('POST', `${c}/tests`, bad)).status, 400, JSON.stringify(bad));
   assert.equal((await call('POST', `${w}/tests`, { args: [] })).status, 400);
+  assert.deepEqual((await call('POST', `${q}/tests`, { args: ['12321'], expected: '[["1"]]' })).json.test.args, ['12321']);
+  await call('DELETE', `${q}/tests/${(await problem(1)).tests[0].id}`);
 
   const good = { language: 'python', code: 'def twice(x):\n    return x * 2' };
   let r = (await call('POST', `${c}/run`, good)).json;
@@ -108,6 +110,10 @@ test('the pad runs the file, keeps tests the user wrote and times the interview'
   assert.ok((await problem()).session.startedAt);
   await call('POST', `${c}/session`, { action: 'end' });
   assert.ok((await problem()).session.endedAt && (await problem()).session.minutes === 45);
+  const first = (await problem()).session.endedAt;
+  await new Promise((r) => setTimeout(r, 20));
+  await call('POST', `${c}/session`, { action: 'end' });
+  assert.equal((await problem()).session.endedAt, first);
   await call('POST', `${c}/session`, { action: 'clear' });
   assert.equal((await problem()).session, null);
   for (const bad of [{ action: 'start', minutes: 7 }, { action: 'nope' }]) assert.equal((await call('POST', `${c}/session`, bad)).status, 400);

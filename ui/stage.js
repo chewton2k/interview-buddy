@@ -197,14 +197,15 @@ function cells(root, first) {
   return { update };
 }
 
-const WORDS = /^(def|return|for|while|if|elif|else|in|not|and|or|is|import|from|as|class|lambda|try|except|finally|raise|with|yield|pass|break|continue|None|True|False|const|let|var|function|new|of|typeof|null|undefined|true|false|auto|int|long|double|bool|char|void|using|namespace|struct|template|include|select|where|group|order|by|having|join|left|on|distinct|limit|union|case|when|then|end|over|partition)$/i;
+const WORDS = /^(def|return|for|while|if|elif|else|in|not|and|or|is|import|from|as|class|lambda|try|except|finally|raise|with|yield|pass|break|continue|None|True|False|const|let|var|function|new|of|typeof|null|undefined|true|false|auto|int|long|double|bool|char|void|using|namespace|struct|template|include)$/;
+const SQL_WORDS = /^(select|from|where|group|order|by|having|join|inner|left|right|on|and|or|not|in|is|null|distinct|limit|union|all|case|when|then|else|end|over|partition|with|as|asc|desc|between|like|exists)$/i;
 function paint(line) {
   const comment = { sql: '--', python: '#' }[Stage.data.language] ?? '//';
   const out = [];
-  const token = /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|#.*|\/\/.*|--.*|[A-Za-z_]\w*|\d[\w.]*|\s+|./g;
+  const token = new RegExp(`"(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'|${comment}.*|[A-Za-z_]\\w*|\\d[\\w.]*|\\s+|.`, 'g');
   for (const [t] of line.matchAll(token)) {
     const rest = line.slice(out.reduce((n, x) => n + x.textContent.length, 0) + t.length);
-    const kind = /^["']/.test(t) && t.length > 1 ? 's' : t.startsWith(comment) ? 'c' : /^\d/.test(t) ? 'd' : WORDS.test(t) ? 'k' : /^[A-Za-z_]/.test(t) ? (/^\s*\(/.test(rest) ? 'f' : 'v') : '';
+    const kind = /^["']/.test(t) && t.length > 1 ? 's' : t.startsWith(comment) ? 'c' : /^\d/.test(t) ? 'd' : (comment === '--' ? SQL_WORDS : WORDS).test(t) ? 'k' : /^[A-Za-z_]/.test(t) ? (/^\s*\(/.test(rest) ? 'f' : 'v') : '';
     out.push(el('span', { class: kind || false }, t));
   }
   return out;

@@ -86,7 +86,7 @@ const marked = new Marked({
       level: 'inline',
       start: (s) => s.search(/\$|\\[([]/),
       tokenizer(s) {
-        const m = s.match(/^\$\$([\s\S]+?)\$\$/) ?? s.match(/^\\\[([\s\S]+?)\\\]/) ?? s.match(/^\$(?!\s)((?:\\.|[^$\\])+?)(?<!\s)\$(?!\d)/) ?? s.match(/^\\\(([\s\S]+?)\\\)/);
+        const m = s.match(/^\$\$([\s\S]+?)\$\$/) ?? s.match(/^\\\[([\s\S]+?)\\\]/) ?? s.match(/^\$(?!\s)((?:\\.|[^$\\])+?)(?<!\s)\$(?!\d)/) ?? s.match(/^\$((?:\\.|[^$\\])*?\\[a-zA-Z]+(?:\\.|[^$\\])*?)\$(?!\d)/) ?? s.match(/^\\\(([\s\S]+?)\\\)/);
         if (m) return { type: 'math', raw: m[0], text: m[1].trim(), display: /^(\$\$|\\\[)/.test(m[0]) };
       },
       renderer: (t) => katex.renderToString(t.text, { displayMode: t.display, throwOnError: false }),

@@ -108,6 +108,7 @@ const readValue = (raw, type, name) => {
     if (type === 'string') return t;
     throw new Invalid(`${name} must be written like ${type.endsWith('[]') ? '[1, 2, 3]' : type === 'bool' ? 'true' : '5'}`);
   }
+  if (type === 'string' && typeof value !== 'string') return t;
   if (!fits(value, type)) throw new Invalid(`${name} must be of type ${type}`);
   return value;
 };
@@ -214,7 +215,7 @@ const routes = [
       const now = new Date().toISOString();
       if (body.action === 'start') p.session = { startedAt: now, endedAt: null, minutes: body.minutes };
       else if (body.action === 'clear') p.session = null;
-      else p.session = { ...(p.session ?? { startedAt: null, minutes: null }), endedAt: now };
+      else p.session = { ...(p.session ?? { startedAt: null, minutes: null }), endedAt: p.session?.endedAt ?? now };
     });
     return {};
   }],

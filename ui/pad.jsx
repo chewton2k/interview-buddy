@@ -86,11 +86,13 @@ function Instructions({ set, problem }) {
   );
 }
 
-function Console({ out, busy, note }) {
+const OLDER = 'From an earlier version of your code';
+function Console({ out, busy, note, older }) {
   if (busy) return <p class="row second"><Icon name="load" /> Running on this computer</p>;
   if (!out) return <p class="second">{note}</p>;
   return (
     <div class="console">
+      {older && <p class="small second">{OLDER}</p>}
       {out.stdout && <pre>{out.stdout.slice(0, 60000)}</pre>}
       {out.stderr && <pre class="bad">{out.stderr}</pre>}
       {!out.stdout && !out.stderr && <p class="muted">Nothing was printed</p>}
@@ -133,7 +135,7 @@ function Results({ signature, shown }) {
 }
 
 const PLACEHOLDER = { int: '5', float: '0.5', string: 'text', bool: 'true' };
-const example = (type) => (type.endsWith('[]') ? `[${example(type.slice(0, -2))}]` : PLACEHOLDER[type]);
+const example = (type) => (type === 'string[]' ? '["text"]' : type.endsWith('[]') ? `[${example(type.slice(0, -2))}]` : PLACEHOLDER[type]);
 
 function OwnTests({ problem, at, reload }) {
   const { signature } = problem.body;
@@ -326,10 +328,10 @@ export function Pad({ set, problem, at, load }) {
           </div>
           <div class="stack" aria-live="polite">
             <Problem>{run.error || test.error || clock.error || finish.error}</Problem>
-            {right === 'output' && <Console out={out} busy={run.busy} note={problem.kind === 'sql' ? 'Run shows what your query returns on the example tables' : 'Run executes your file and prints here, so call your function and print what you want to see'} />}
+            {right === 'output' && <Console out={out} older={out && !same(out)} busy={run.busy} note={problem.kind === 'sql' ? 'Run shows what your query returns on the example tables' : 'Run executes your file and prints here, so call your function and print what you want to see'} />}
             {right === 'tests' && (
               <>
-                {test.busy ? <p class="row second"><Icon name="load" /> Running on this computer</p> : tested && <><h3 class={tested.results.every((r) => r.status === 'pass') ? 'good' : 'bad'}>{count(tested)}</h3><Results signature={body.signature} shown={tested} /></>}
+                {test.busy ? <p class="row second"><Icon name="load" /> Running on this computer</p> : tested && <><h3 class={tested.results.every((r) => r.status === 'pass') ? 'good' : 'bad'}>{count(tested)}</h3>{!same(tested) && <p class="small second">{OLDER}</p>}<Results signature={body.signature} shown={tested} /></>}
                 <OwnTests problem={problem} at={at} reload={load} />
               </>
             )}
@@ -337,7 +339,7 @@ export function Pad({ set, problem, at, load }) {
               <>
                 {!review && !ended && !finish.busy && <p class="second">Finish the interview to run every hidden test and get feedback. Hints and the solution open here then.</p>}
                 {finish.busy && <p class="row second"><Icon name="load" /> {review ? 'Writing your feedback' : 'Running every test'}</p>}
-                {review && <><h3 class={passed ? 'good' : 'bad'}>{count(review)}</h3><Results signature={body.signature} shown={review} /></>}
+                {review && <><h3 class={passed ? 'good' : 'bad'}>{count(review)}</h3>{!same(review) && <p class="small second">{OLDER}</p>}<Results signature={body.signature} shown={review} /></>}
                 <Feedback feedback={feedback} />
                 {(ended || review) && (
                   <>
