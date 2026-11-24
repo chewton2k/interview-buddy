@@ -213,6 +213,10 @@ function code(root) {
 
 const data = JSON.parse(document.getElementById('stage-data').textContent);
 window.Stage = { data, trace: data.trace ?? [], colors, el, svg, math, tween, player, slider, plot, cells, code, num };
+addEventListener('load', () => {
+  const box = document.getElementById('stage');
+  new ResizeObserver(() => tell('height', Math.ceil(box.getBoundingClientRect().height) + 40)).observe(box);
+});
 addEventListener('load', () =>
   setTimeout(() => {
     const body = document.getElementById('stage');

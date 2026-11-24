@@ -46,9 +46,11 @@ export const PROVIDERS = {
       const { models } = JSON.parse(r.stdout);
       return models.filter((m) => m.visibility === 'list').map((m) => ({ id: m.slug, label: m.display_name }));
     },
-    async call({ model, effort, prompt, schema, dir, signal, timeout }) {
+    async call({ model, effort, prompt, schema, images, dir, signal, timeout }) {
+      await Promise.all(images.map((b64, i) => fs.writeFile(path.join(dir, `${i}.png`), b64, 'base64')));
       await fs.writeFile(path.join(dir, 'schema.json'), JSON.stringify(schema));
       const args = ['exec', '-', '--json', '--ephemeral', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check', '-s', 'read-only', '--output-schema', 'schema.json', '-o', 'out.json', '-c', 'project_doc_max_bytes=0', '-c', 'web_search=disabled', ...OFF.flatMap((f) => ['-c', `features.${f}=false`])];
+      args.push(...images.map((_, i) => `--image=${i}.png`));
       if (model) args.push('--model', model);
       if (effort) args.push('-c', `model_reasoning_effort=${effort}`);
       const r = await runCli('codex', args, { input: `${SYSTEM}\n\n${prompt}`, cwd: dir, signal, timeout });
@@ -64,14 +66,18 @@ export const PROVIDERS = {
     status: ['auth', 'status'],
     signedIn: (r) => r.code === 0 && /"loggedIn":\s*true/.test(r.stdout),
     models: async () => ['fable', 'opus', 'sonnet', 'haiku'].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) })),
-    async call({ model, effort, prompt, schema, dir, signal, timeout }) {
-      const args = ['-p', '--safe-mode', '--no-session-persistence', '--output-format', 'json', '--system-prompt', SYSTEM, '--json-schema', JSON.stringify(schema), '--tools', ''];
+    async call({ model, effort, prompt, schema, images, dir, signal, timeout }) {
+      // Images need the streaming form, which prints one JSON event per line and ends with the result.
+      const format = images.length ? ['--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'] : ['--output-format', 'json'];
+      const content = [...images.map((d) => ({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: d } })), { type: 'text', text: prompt }];
+      const input = images.length ? `${JSON.stringify({ type: 'user', message: { role: 'user', content } })}\n` : prompt;
+      const args = ['-p', '--safe-mode', '--no-session-persistence', ...format, '--system-prompt', SYSTEM, '--json-schema', JSON.stringify(schema), '--tools', ''];
       if (model) args.push('--model', model);
       if (effort) args.push('--effort', effort);
-      const r = await runCli('claude', args, { input: prompt, cwd: dir, signal, timeout });
+      const r = await runCli('claude', args, { input, cwd: dir, signal, timeout });
       let out;
       try {
-        out = JSON.parse(r.stdout);
+        out = JSON.parse(images.length ? r.stdout.trim().split('\n').at(-1) : r.stdout);
       } catch {
         throw r.code !== 0 ? classify(r.stderr || r.stdout) : new ProviderError('badjson', 'Claude did not return JSON');
       }
@@ -153,10 +159,10 @@ function runCli(command, args, { input = '', cwd = os.tmpdir(), signal, timeout 
 }
 
 /** Calls one local CLI and returns the object it produced for `schema`. Throws ProviderError. */
-export async function ask({ provider, model, effort, prompt, schema, signal, timeout = 600000 }) {
+export async function ask({ provider, model, effort, prompt, schema, images = [], signal, timeout = 600000 }) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'interview-buddy-ask-'));
   try {
-    const value = await PROVIDERS[provider].call({ model, effort, prompt, schema, dir, signal, timeout });
+    const value = await PROVIDERS[provider].call({ model, effort, prompt, schema, images, dir, signal, timeout });
     const bad = misfit(value, schema);
     if (bad) throw new ProviderError('badjson', `The model left out or misused ${bad}. Try again.`);
     return value;

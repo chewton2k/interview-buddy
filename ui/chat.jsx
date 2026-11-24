@@ -7,7 +7,7 @@ export function Chat({ setId, problem, at, work, reload, onClose }) {
   const list = problem.chat ?? [];
   useEffect(() => end.current?.scrollIntoView({ block: 'nearest' }), [list.length, problem.chatBusy]);
   const send = useAction(async (extra) => {
-    await api('POST', `${at}/chat`, { ...work.current, ...extra });
+    await api('POST', `${at}/chat`, { ...(await work.current()), ...extra });
     if (!extra.retry) setText('');
     await reload();
   });
@@ -26,7 +26,7 @@ export function Chat({ setId, problem, at, work, reload, onClose }) {
         {list.map((m, i) => (
           <div key={i} class={`said ${m.role}`}>
             <span class="sr">{m.role === 'user' ? 'You' : 'Reply'}</span>
-            {m.role === 'user' ? <p>{m.text}</p> : <Prose text={m.text} />}
+            <Prose text={m.text} />
             {m.problemId && (
               <a class="btn" href={`#/sets/${setId}/${m.problemId}`}>
                 Open the new problem
@@ -62,7 +62,7 @@ export function Chat({ setId, problem, at, work, reload, onClose }) {
           aria-label="Your message"
           rows={3}
           maxLength={4000}
-          placeholder="Why does my loop miss the last pair?"
+          placeholder="Ask anything about this problem"
           value={text}
           onInput={(e) => setText(e.target.value)}
           onKeyDown={(e) => {

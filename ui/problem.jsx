@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { Draw } from './draw.jsx';
+import { Notes } from './notes.jsx';
 import { Analysis } from './analysis.jsx';
 import { Chat } from './chat.jsx';
 import { Editor } from './editor.jsx';
@@ -127,10 +129,11 @@ function CodeWork({ problem, at, work, analyze }) {
   });
   const passed = shown?.results.filter((r) => r.status === 'pass').length;
   const ask = useAction(async () => {
-    setFeedback((await api('POST', `${at}/feedback`, { answer: code[language], outcome: work.current.outcome })).feedback);
+    setFeedback((await api('POST', `${at}/feedback`, { answer: code[language], outcome: outcome.outcome })).feedback);
   });
   const result = shown?.results[pick];
-  work.current = { language, code: code[language], outcome: shown?.language === language && shown.code === code[language] ? `${passed} of ${shown.results.length} ${shown.how === 'run' ? 'examples' : 'tests'} pass in ${LANGUAGES[language]}` : '' };
+  const outcome = { language, code: code[language], outcome: shown?.language === language && shown.code === code[language] ? `${passed} of ${shown.results.length} ${shown.how === 'run' ? 'examples' : 'tests'} pass in ${LANGUAGES[language]}` : '' };
+  work.current = () => outcome;
   const busy = run.busy || ask.busy;
   return (
     <section class="work" aria-label="Your solution">
@@ -219,7 +222,12 @@ function TextWork({ problem, at, work, analyze }) {
   const [working, setWorking] = useState(draft.working ?? '');
   const [verdict, setVerdict] = useState(null);
   const [feedback, setFeedback] = useState(problem.feedback);
+  const [mode, setMode] = useState('write');
+  const [elements, setElements] = useState(null);
   const save = useDebounced((d) => api('PUT', `${at}/draft`, d).catch(() => {}), 600);
+  const keep = useDebounced((list) => api('PUT', `${at}/drawing`, { elements: list }).catch(() => {}), 800);
+  const drawn = useAction(async () => setElements((await api('GET', `${at}/drawing`)).elements));
+  useEffect(() => void drawn.run(), []);
   const edit = (a, w) => {
     setAnswer(a);
     setWorking(w);
@@ -232,12 +240,13 @@ function TextWork({ problem, at, work, analyze }) {
   });
   const ask = useAction(async () => {
     const said = kind === 'numeric' ? `Answer: ${answer} ${body.unit}\n\n${working}` : working;
-    if (!answer.trim() && !working.trim()) throw new Error('Write an answer first');
-    const outcome = verdict ? (verdict.correct ? 'The number is correct' : 'The number is not correct') : '';
-    setFeedback((await api('POST', `${at}/feedback`, { answer: said, outcome })).feedback);
+    if (!answer.trim() && !working.trim() && !elements?.length) throw new Error('Write or draw an answer first');
+    setFeedback((await api('POST', `${at}/feedback`, { answer: said, outcome, ...(await sketch()) })).feedback);
   });
   const numeric = kind === 'numeric';
-  work.current = { answer, working, outcome: verdict ? (verdict.correct ? 'The number is correct' : 'The number is not correct') : '' };
+  const outcome = verdict ? (verdict.correct ? 'The number is correct' : 'The number is not correct') : '';
+  const sketch = async () => (elements?.length ? { drawing: await (await import('./canvas.jsx')).snapshot(elements) } : {});
+  work.current = async () => ({ answer, working, outcome, ...(await sketch()) });
   return (
     <section class="work plain" aria-label="Your answer">
       <form
@@ -258,8 +267,28 @@ function TextWork({ problem, at, work, analyze }) {
           </div>
         )}
         <div class="field">
-          <label for="working">{numeric ? 'Your working' : 'Your answer'}</label>
-          <textarea id="working" class="input" rows={numeric ? 8 : 16} maxLength={50000} value={working} onInput={(e) => edit(answer, e.target.value)} />
+          <div class="row between wrap">
+            <h3>{numeric ? 'Your working' : 'Your answer'}</h3>
+            <span class="cases" role="group" aria-label="Answer with">
+              {[['write', 'Write'], ['draw', 'Draw']].map(([k, label]) => (
+                <button key={k} type="button" class="case" aria-pressed={mode === k} onClick={() => setMode(k)}>{label}</button>
+              ))}
+            </span>
+          </div>
+          <div hidden={mode !== 'write'}>
+            <Notes value={working} label={numeric ? 'Your working' : 'Your answer'} rows={numeric ? 6 : 12} onChange={(t) => edit(answer, t)} />
+          </div>
+          {mode === 'draw' && elements && (
+            <Draw
+              elements={elements}
+              onChange={(list) => {
+                setElements(list);
+                keep(list);
+              }}
+            />
+          )}
+          {mode === 'draw' && <Problem>{drawn.error}</Problem>}
+          {mode === 'write' && elements?.length > 0 && <span class="hint">Your drawing is included too</span>}
         </div>
         <div class="row wrap">
           {numeric && <button class="btn primary" disabled={check.busy}>Check answer</button>}
@@ -304,7 +333,7 @@ export function ProblemPage({ params: [id, pid] }) {
   const at = `/sets/${id}/problems/${pid}`;
   const analyze = useAction(async () => {
     setTab('analysis');
-    await api('POST', `${at}/analyze`, work.current);
+    await api('POST', `${at}/analyze`, await work.current());
     await load();
   });
   const set = value?.set;

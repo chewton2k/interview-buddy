@@ -2,7 +2,7 @@ import { addProblem, data, obj, str, tracked } from './generate.js';
 import { dropLinks, findLinks } from './link.js';
 import { ask, ProviderError } from './providers.js';
 import { runCode } from './sandbox.js';
-import { Invalid, readSet, readSettings, updateProblem } from './store.js';
+import { checkDrawing, Invalid, readSet, readSettings, updateProblem } from './store.js';
 
 const HTML_LIMIT = 200000;
 const need = (v, name, max) => {
@@ -10,7 +10,9 @@ const need = (v, name, max) => {
   if (typeof v !== 'string' || v.length > max) throw new Invalid(`${name} must be text of at most ${max.toLocaleString('en-US')} characters`);
   return v;
 };
-const work = (b) => ({ language: need(b.language, 'Language', 20), code: need(b.code, 'Code', 100000), answer: need(b.answer, 'Answer', 1000), working: need(b.working, 'Your working', 100000), outcome: need(b.outcome, 'Outcome', 500) });
+const work = (b) => ({ language: need(b.language, 'Language', 20), code: need(b.code, 'Code', 100000), answer: need(b.answer, 'Answer', 1000), working: need(b.working, 'Your working', 100000), outcome: need(b.outcome, 'Outcome', 500), drawing: checkDrawing(b.drawing) });
+const seen = (drawing) => (drawing ? '\nThe attached image is the candidate\'s drawing, which is part of their work.' : '');
+const worded = ({ drawing, ...rest }) => ({ ...rest, drawing: drawing?.outline });
 const ready = (p) => {
   if (p.status !== 'ready') throw new Invalid('This problem is not ready yet');
 };
@@ -47,8 +49,8 @@ export async function chat(setId, pid, body) {
       const prompt = `You are the candidate's interview partner for one practice problem. Answer their last message in the transcript.
 Be direct and concrete, refer to what they actually wrote, and keep to what was asked. Nudge rather than hand over the full solution unless they ask for it. Use Markdown, with $...$ for math and fenced code where it helps. Never write a dollar sign for money.
 new_problem is an empty string unless the candidate asks you to make a new practice problem, for example from a link, an idea or as a variation of this one. Then describe the problem to write in a few self-contained sentences, with no links, and say in reply that it is being made. The app opens links the candidate pasted.
-${data({ problem: { title: problem.title, subject: problem.subject, ...known(problem.body) }, candidate_work: now, transcript: problem.chat.slice(-20).map(({ role, text }) => ({ role, text })) })}`;
-      const r = await ask({ ...tutor, prompt, schema: chatSchema, signal: job.signal });
+${data({ problem: { title: problem.title, subject: problem.subject, ...known(problem.body) }, candidate_work: worded(now), transcript: problem.chat.slice(-20).map(({ role, text }) => ({ role, text })) })}${seen(now.drawing)}`;
+      const r = await ask({ ...tutor, prompt, images: now.drawing ? [now.drawing.png] : [], schema: chatSchema, signal: job.signal });
       // Links come from the candidate's own words only. A page or a reply must not be able to choose what gets opened.
       const problemId = r.new_problem.trim() ? await addProblem(setId, { request: question, guidance: dropLinks(r.new_problem), subject: '', links: findLinks(question) }) : undefined;
       await updateProblem(setId, pid, (p) => void Object.assign(p, { chat: [...p.chat, { role: 'assistant', text: r.reply, problemId }], chatBusy: false }));
@@ -97,7 +99,7 @@ function visualPrompt(problem, evidence, fix) {
       ? evidence.trace.length
         ? 'Step through Stage.trace, which was recorded from the real run. Never invent values. Show the code with Stage.code next to the picture and keep both in step. Group consecutive trace events into meaningful steps when there are more than 40. If the run is wrong or fails, make the exact step where it goes wrong unmistakable and show what was expected.'
         : 'No line by line recording exists for this run, so work the real input through the code by hand, stay faithful to what the code does, and end at the real result. If it does not compile or is unfinished, show the idea it is missing on the real input.'
-      : 'Show the reasoning in the working, in order, and make the first place it departs from a correct argument unmistakable. Let the candidate vary the givens with sliders that start at the values in the statement, recompute from the real relations, and mark both their answer and the correct one. If they wrote nothing yet, show the setup and how the quantities relate without stating the final answer.';
+      : 'Show the reasoning in the working, in order, and make the first place it departs from a correct argument unmistakable. Let the candidate vary the givens with sliders that start at the values in the statement, recompute from the real relations, and mark both their answer and the correct one. If they drew something, redraw it cleanly as the base of the picture. If they wrote and drew nothing yet, show the setup and how the quantities relate without stating the final answer.';
   return `Build one interactive picture that explains this candidate's own solution to them. ${IDEAS}
 ${rules}
 ${STYLE}
@@ -115,7 +117,7 @@ const brief = (e) => {
   return { ...e, trace, trace_events: e.trace.length, trace_shortened: trace.length < e.trace.length };
 };
 
-function draw(setId, pid, evidenceOf, fix) {
+function draw(setId, pid, evidenceOf, fix, drawing) {
   const put = (patch) => updateProblem(setId, pid, (p) => void Object.assign(p.visual, patch));
   return tracked(setId, async (job) => {
     try {
@@ -123,7 +125,7 @@ function draw(setId, pid, evidenceOf, fix) {
       const evidence = await evidenceOf(problem);
       await put({ step: fix ? 'Fixing the drawing' : 'Drawing', data: evidence });
       const { tutor } = await readSettings();
-      const r = await ask({ ...tutor, prompt: visualPrompt(problem, brief(evidence), fix), schema: visualSchema, signal: job.signal });
+      const r = await ask({ ...tutor, prompt: visualPrompt(problem, brief(evidence), fix) + seen(drawing), images: drawing ? [drawing.png] : [], schema: visualSchema, signal: job.signal });
       if (!r.html.trim()) throw new ProviderError('badjson', 'The model did not return a drawing. Try again.');
       if (r.html.length > HTML_LIMIT) throw new ProviderError('badjson', 'The drawing was too large. Try again.');
       await put({ status: 'ready', step: null, summary: r.summary, html: r.html, recorded: Boolean(evidence.trace?.length), repaired: Boolean(fix), version: Date.now() });
@@ -143,7 +145,7 @@ export async function analyze(setId, pid, body) {
     if (p.kind === 'code' && !['python', 'javascript', 'cpp'].includes(now.language)) throw new Invalid('Choose a language');
     p.visual = { status: 'working', step: p.kind === 'code' ? 'Running your code' : 'Reading your work', error: '' };
   });
-  draw(setId, pid, (p) => (p.kind === 'code' ? codeEvidence(p, now) : { answer: now.answer, working: now.working, outcome: now.outcome, correct: p.body.answer, unit: p.body.unit }));
+  draw(setId, pid, (p) => (p.kind === 'code' ? codeEvidence(p, now) : { answer: now.answer, working: now.working, outcome: now.outcome, drawing: now.drawing?.outline, correct: p.body.answer, unit: p.body.unit }), null, now.drawing);
 }
 
 /** One automatic second try when the frame reports an error. */

@@ -24,7 +24,11 @@ export function Editor({ language, value, onChange, onRun }) {
   latest.current = { onChange, onRun };
   useEffect(() => {
     const run = () => (latest.current.onRun(), true);
-    const view = new EditorView({
+    let view;
+    let gone = false;
+    const open = () => {
+      if (gone) return;
+      view = new EditorView({
       parent: host.current,
       state: EditorState.create({
         doc: value,
@@ -41,8 +45,13 @@ export function Editor({ language, value, onChange, onRun }) {
         ],
       }),
     });
-    document.fonts.ready.then(() => view.requestMeasure());
-    return () => view.destroy();
+    };
+    // Line heights are measured once, so the code font has to be there first.
+    document.fonts.load('14px "Atkinson Hyperlegible Mono Variable"').then(open, open);
+    return () => {
+      gone = true;
+      view?.destroy();
+    };
   }, []);
   return <div class="editor" ref={host} />;
 }

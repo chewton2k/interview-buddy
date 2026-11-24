@@ -14,8 +14,11 @@ export function Analysis({ problem, at, analyze, reload }) {
     setBroken('');
     if (!ready) return;
     let seen = false;
+    let sizes = 0;
     const listen = (e) => {
-      if (e.source !== frame.current?.contentWindow || e.data?.stage !== 'error' || seen) return;
+      if (e.source !== frame.current?.contentWindow) return;
+      if (e.data?.stage === 'height' && sizes++ < 60) frame.current.style.height = `${Math.min(2400, Math.max(360, Number(e.data.message) || 0))}px`;
+      if (e.data?.stage !== 'error' || seen) return;
       seen = true;
       if (visual.repaired) setBroken('Part of this drawing does not work. Draw it again for a new one.');
       else repair.run(String(e.data.message));

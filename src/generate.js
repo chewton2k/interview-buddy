@@ -6,7 +6,7 @@ import { ask, ProviderError } from './providers.js';
 import { runCode, tools } from './sandbox.js';
 import { createSetFile, ensureSet, Invalid, listSets, readSet, readSettings, updateProblem, updateSet } from './store.js';
 
-export const SUBJECTS = ['Coding', 'Quant', 'Math', 'Physics', 'Chemistry', 'Circuit design'];
+export const SUBJECTS = ['Coding', 'Quant', 'Math', 'Physics', 'Chemistry', 'Circuit design', 'System design'];
 export const LEVELS = ['Intern', 'New grad', 'Mid', 'Senior'];
 const TYPES = 'int, float, string, bool, and lists of them written int[], string[][] and so on, up to three levels deep';
 const MAX_TRIES = 3;
@@ -54,7 +54,7 @@ ${data({ request: p.request, guidance: p.guidance, level: intake.level, ...(inta
 
 const planPrompt = (intake) => `Plan a practice set of exactly ${intake.count} problems for the interview described below.
 Use every listed subject at least once and no other subject. Match the level, the company's domain and what the rounds test. Order from easier to harder, and vary the topics.
-kind is "code" for a function the candidate writes and runs against tests, "numeric" for one number as the answer, "written" for design, derivation or explanation that a rubric grades. Prefer code for coding subjects and numeric for quant, math, physics, chemistry and circuits. Use written where an interviewer would want the reasoning.
+kind is "code" for a function the candidate writes and runs against tests, "numeric" for one number as the answer, "written" for design, derivation or explanation that a rubric grades. Prefer code for coding subjects and numeric for quant, math, physics, chemistry and circuits. Use written for system design and wherever an interviewer would want the reasoning or a diagram. The candidate can write, typeset equations and draw.
 quote must be 3 to 15 consecutive words copied exactly from "posting" or "rounds" that the problem trains. Prefer a different quote for each problem. Use an empty string only when nothing fits.
 topic is one sentence telling the author what to write. title is at most 8 words in sentence case.
 ${data(intake)}`;
@@ -69,7 +69,7 @@ solution_python is an efficient solution. brute_python solves the same task by a
 State constraints and the expected time complexity in the statement. Do not repeat the examples in the statement.`,
   numeric: `kind: numeric. The answer is one finite real number in the stated unit (empty string for a pure number). Say in the statement which unit, and how many significant figures are needed. tolerance is the relative error to accept, between 0.0001 and 0.05.
 solver_python defines solve() with no parameters and returns the number, computed from the givens in the statement without using your stated answer. Standard library only. It will be executed and must match answer.`,
-  written: `kind: written. Ask for a design, derivation or explanation that can be answered in 10 to 20 minutes of writing. No number or code is checked, so the rubric decides.`,
+  written: `kind: written. Ask for a design, derivation or explanation that can be answered in 10 to 20 minutes of writing or drawing. The candidate has a drawing canvas, so ask for a diagram where an interviewer would. No number or code is checked, so the rubric decides.`,
 };
 const figure = `figure_svg: an inline SVG drawing when one genuinely helps, such as a circuit, free-body diagram or apparatus, otherwise an empty string. Include xmlns, a viewBox about 400 wide, black strokes on white, text of at least 14px, no scripts, no external references.`;
 const problemPrompt = (kind, intake, brief, problem) => `Write one original interview problem.
@@ -331,12 +331,12 @@ export async function recoverInterrupted() {
   }
 }
 
-export async function grade({ problem, answer, outcome, signal }) {
+export async function grade({ problem, answer, outcome, drawing, signal }) {
   const { grade: choice } = await readSettings();
   const { statement, rubric, solutionText, solutionCode, answer: correct, unit } = problem.body;
   const prompt = `Grade this interview answer as a fair, specific interviewer. Give one entry in points for each of the ${rubric.length} rubric points, in order. mark is met, partial or missed. note is one or two sentences addressed to the candidate that point at what they wrote, and is empty when the point is fully met. summary is two sentences with the single most useful next step. Grade only what is written. Use $...$ for math.
-${data({ statement, rubric, reference: solutionCode ?? solutionText, correct_answer: correct === undefined ? undefined : `${correct} ${unit}`, outcome, candidate_answer: answer })}`;
-  const g = await ask({ ...choice, prompt, schema: gradeSchema, signal });
+${data({ statement, rubric, reference: solutionCode ?? solutionText, correct_answer: correct === undefined ? undefined : `${correct} ${unit}`, outcome, candidate_answer: answer, candidate_drawing: drawing?.outline })}${drawing ? '\nThe attached image is the drawing that is part of their answer. Judge what it shows.' : ''}`;
+  const g = await ask({ ...choice, prompt, schema: gradeSchema, images: drawing ? [drawing.png] : [], signal });
   if (g.points.length !== rubric.length) throw new ProviderError('badjson', 'The grader skipped part of the rubric. Try again.');
   const score = g.points.reduce((s, p) => s + (p.mark === 'met' ? 1 : p.mark === 'partial' ? 0.5 : 0), 0) / rubric.length;
   return { summary: g.summary, score, points: g.points.map((p, i) => ({ point: rubric[i], mark: p.mark, note: p.note })) };

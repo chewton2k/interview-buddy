@@ -132,7 +132,7 @@ test('status and options', async () => {
   assert.equal(s.sandbox.ok, true, s.sandbox.detail);
   for (const v of Object.values(s.languages)) assert.match(v, /^\d+\./);
   assert.equal(s.providers.length, 2);
-  assert.equal((await call('GET', '/api/options')).json.subjects.length, 6);
+  assert.equal((await call('GET', '/api/options')).json.subjects.length, 7);
 });
 
 test('requests from other sites and malformed requests are refused', async () => {
@@ -150,7 +150,7 @@ test('requests from other sites and malformed requests are refused', async () =>
     [400, 'POST', '/api/sets', { body: '{', headers: { ...json, origin } }],
     [400, 'POST', '/api/sets', { body: 'null', headers: { ...json, origin } }],
     [400, 'POST', '/api/sets', { body: '{}', headers: { ...json, origin } }],
-    [413, 'POST', '/api/sets', { body: JSON.stringify({ a: 'x'.repeat(1 << 20) }), headers: { ...json, origin } }],
+    [413, 'POST', '/api/sets', { body: JSON.stringify({ a: 'x'.repeat(6 << 20) }), headers: { ...json, origin } }],
     [404, 'GET', '/api/nothing', {}],
     [405, 'PUT', '/api/sets', { body, headers: { ...json, origin } }],
     [404, 'GET', '/api/sets/..%2f..%2fsettings', {}],

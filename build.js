@@ -3,15 +3,20 @@ if (!fs.existsSync('ui/main.jsx')) process.exit(0);
 const { build } = await import('esbuild');
 fs.rmSync('dist', { recursive: true, force: true });
 await build({
-  entryPoints: { app: 'ui/main.jsx', style: 'ui/style.css' },
+  entryPoints: { app: 'ui/main.jsx', style: 'ui/style.css', canvas: 'node_modules/@excalidraw/excalidraw/dist/prod/index.css' },
   bundle: true,
   minify: true,
   format: 'esm',
+  splitting: true,
+  chunkNames: 'chunks/[name]-[hash]',
+  define: { 'process.env.NODE_ENV': '"production"', 'process.env.IS_PREACT': '"false"' },
+  conditions: ['production'],
   target: 'safari17',
   outdir: 'dist',
   jsx: 'automatic',
   jsxImportSource: 'preact',
   loader: { '.woff2': 'file', '.woff': 'empty', '.ttf': 'empty' },
+  logOverride: { 'empty-import-meta': 'silent' },
   assetNames: 'fonts/[name]-[hash]',
 });
 // The analysis frame has no network, so its script, styles and fonts are inlined by the server.
@@ -22,3 +27,6 @@ const face = (name) => {
 };
 fs.writeFileSync('dist/stage.css', `${face('next')}${face('mono')}${fs.readFileSync('ui/stage.css', 'utf8')}`);
 fs.copyFileSync('ui/index.html', 'dist/index.html');
+// The canvas and the equation editor load their own fonts. The 12 MB Chinese handwriting font is left out.
+fs.cpSync('node_modules/@excalidraw/excalidraw/dist/prod/fonts', 'dist/fonts', { recursive: true, filter: (f) => !f.includes('Xiaolai') });
+fs.cpSync('node_modules/mathlive/fonts', 'dist/fonts/math', { recursive: true });

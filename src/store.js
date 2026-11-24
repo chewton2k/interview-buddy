@@ -56,6 +56,30 @@ export async function createSetFile(intake) {
   await writeJson(setFile(set.id), set);
   return set;
 }
+const drawingFile = (id, pid) => {
+  if (!ID.test(id) || !ID.test(pid)) throw new NotFound();
+  return path.join(home(), 'drawings', id, `${pid}.json`);
+};
+export const readDrawing = async (id, pid) => {
+  const file = drawingFile(id, pid);
+  await readSet(id);
+  return readJson(file).catch((e) => (e instanceof NotFound ? { elements: [] } : Promise.reject(e)));
+};
+export const saveDrawing = async (id, pid, elements) => {
+  if (!Array.isArray(elements) || JSON.stringify(elements).length > 3 << 20) throw new Invalid('The drawing is too large to save');
+  const file = drawingFile(id, pid);
+  await locked(id, async () => {
+    await readSet(id);
+    await writeJson(file, { elements });
+  });
+};
+export function checkDrawing(d) {
+  if (d === undefined) return undefined;
+  if (typeof d?.png !== 'string' || typeof d.outline !== 'string' || d.outline.length > 10000) throw new Invalid('The drawing could not be read');
+  if (d.png.length > 4 << 20 || !/^iVBORw0KGgo[A-Za-z0-9+/]*={0,2}$/.test(d.png)) throw new Invalid('The drawing must be a PNG under 3 MB');
+  return { png: d.png, outline: d.outline };
+}
+
 export const ensureSet = (id, make) =>
   locked(id, async () => {
     try {
@@ -67,7 +91,11 @@ export const ensureSet = (id, make) =>
       return set;
     }
   });
-export const deleteSet = (id) => locked(id, () => fs.rm(setFile(id)).catch((e) => Promise.reject(e.code === 'ENOENT' ? new NotFound() : e)));
+export const deleteSet = (id) =>
+  locked(id, async () => {
+    await fs.rm(setFile(id)).catch((e) => Promise.reject(e.code === 'ENOENT' ? new NotFound() : e));
+    await fs.rm(path.join(home(), 'drawings', id), { recursive: true, force: true });
+  });
 export async function listSets() {
   const names = await fs.readdir(path.join(home(), 'sets')).catch(() => []);
   const sets = await Promise.all(names.filter((n) => ID.test(n.replace(/\.json$/, ''))).map((n) => readSet(n.slice(0, -5)).catch(() => null)));

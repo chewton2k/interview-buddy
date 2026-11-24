@@ -8,14 +8,14 @@ import { starter } from './harness.js';
 import { findLinks } from './link.js';
 import { ping, ProviderError, providerStatus } from './providers.js';
 import { LANGUAGES, runCode, selfTest, tools } from './sandbox.js';
-import { checkChoice, deleteSet, Invalid, listSets, NotFound, readSet, readSettings, saveSettings, updateProblem } from './store.js';
+import { checkChoice, checkDrawing, deleteSet, Invalid, listSets, NotFound, readDrawing, readSet, readSettings, saveDrawing, saveSettings, updateProblem } from './store.js';
 import { analyze, chat, repair, visualOf } from './tutor.js';
 
 const DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2' };
 const CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const FRAME_CSP = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
-const BODY_LIMIT = 1 << 20;
+const BODY_LIMIT = 6 << 20;
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -50,7 +50,7 @@ async function readBody(req) {
   const chunks = [];
   for await (const c of req) {
     size += c.length;
-    if (size > BODY_LIMIT) throw new HttpError(413, 'That is larger than 1 MB');
+    if (size > BODY_LIMIT) throw new HttpError(413, 'That is larger than 6 MB');
     chunks.push(c);
   }
   try {
@@ -141,6 +141,8 @@ const routes = [
     await updateProblem(id, pid, (p) => void (p.draft = draft));
     return {};
   }],
+  ['GET', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/drawing$/, ([id, pid]) => readDrawing(id, pid)],
+  ['PUT', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/drawing$/, async ([id, pid], body) => (await saveDrawing(id, pid, body.elements), {})],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/run$/, ([id, pid], body) => runFor(id, pid, body, true)],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/submit$/, async ([id, pid], body) => {
     const r = await runFor(id, pid, body, false);
@@ -158,8 +160,9 @@ const routes = [
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/feedback$/, async ([id, pid], body, signal) => {
     const problem = await readyProblem(id, pid);
     const answer = needText(body.answer, 'Your answer');
-    if (!answer.trim()) throw new Invalid('Write an answer first');
-    const feedback = await grade({ problem, answer, outcome: needText(body.outcome ?? '', 'Outcome', 500), signal });
+    const drawing = checkDrawing(body.drawing);
+    if (!answer.trim() && !drawing) throw new Invalid('Write or draw an answer first');
+    const feedback = await grade({ problem, answer, drawing, outcome: needText(body.outcome ?? '', 'Outcome', 500), signal });
     await updateProblem(id, pid, (p) => {
       p.feedback = feedback;
       if (p.kind === 'written') advance(feedback.score >= 0.8)(p);
