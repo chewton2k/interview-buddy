@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import { after, before, test } from 'node:test';
-import { brief, calls, clearCalls, code, intake, numeric, replies, written } from './stub/setup.js';
+import { brief, calls, clearCalls, code, intake, numeric, replies, sql, ui, written } from './stub/setup.js';
 import { createServer } from '../src/server.js';
 
 const server = createServer();
@@ -102,6 +102,33 @@ test('a set can be listed, solved in every kind and deleted', async () => {
   assert.equal((await call('DELETE', `/api/sets/${id}`)).status, 404);
 });
 
+test('SQL and interface problems can be solved, and the preview page is locked', async () => {
+  replies([{ match: 'Plan a', reply: { problems: [brief({ kind: 'sql' }), brief({ kind: 'ui' })] } }, { match: 'kind: sql.', reply: sql() }, { match: 'kind: ui.', reply: ui() }]);
+  const { id } = (await call('POST', '/api/sets', { ...intake, count: 2 })).json;
+  const set = await ready(id);
+  assert.deepEqual(set.problems.map((p) => p.status), ['ready', 'ready']);
+  assert.deepEqual(Object.keys(set.problems[0].starters), ['sql']);
+  const [q, u] = set.problems.map((p) => `/api/sets/${id}/problems/${p.id}`);
+  const submit = async (c) => (await call('POST', `${q}/submit`, { code: c })).json.results.map((r) => r.status);
+  assert.deepEqual(await submit("SELECT name, TOTAL(v) FROM t GROUP BY name HAVING 'caf\u00e9' > '' ORDER BY 1 DESC"), ['pass', 'pass', 'fail', 'pass']);
+  assert.deepEqual(await submit('SELECT name, SUM(v) FROM t GROUP BY 1'), ['pass', 'pass', 'pass', 'pass']);
+  assert.match((await call('POST', `${q}/run`, { code: 'SELEC' })).json.results[0].error, /syntax error/);
+  assert.equal((await call('POST', `${u}/run`, { code: '' })).status, 400);
+  assert.equal((await call('POST', `${u}/checked`, { passed: 2, total: 3 })).status, 200);
+  assert.equal((await call('POST', `${u}/checked`, { passed: 'x', total: 3 })).status, 400);
+  assert.equal((await call('POST', `${q}/checked`, { passed: 3, total: 3 })).status, 400);
+  await call('POST', `${u}/checked`, { passed: 3, total: 3 });
+  assert.deepEqual((await ready(id)).problems.map((p) => p.progress), ['solved', 'solved']);
+  replies([{ match: 'interactive picture', reply: { summary: 's', html: '<p>x</p>' } }]);
+  clearCalls();
+  await call('POST', `${q}/analyze`, { code: 'SELECT 1, 2' });
+  await call('POST', `${u}/analyze`, { code: '<b>mine</b>', outcome: '1 of 3 checks pass' });
+  for (let i = 0; calls().length < 2 && i < 200; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.ok(calls().some((c) => c.prompt.includes('SELECT 1, 2')) && calls().some((c) => c.prompt.includes('1 of 3 checks pass')));
+  const page = await raw('GET', '/preview.html');
+  assert.match(page.headers['content-security-policy'], /^sandbox allow-scripts allow-forms; default-src 'none'; script-src 'unsafe-inline'/);
+});
+
 test('a failed problem reports its error and refuses answers', async () => {
   replies([{ match: 'Plan a', reply: { problems: [brief()] } }, { match: 'Write one', exit: 'not logged in' }]);
   const { id } = (await call('POST', '/api/sets', intake)).json;
@@ -132,7 +159,7 @@ test('status and options', async () => {
   assert.equal(s.sandbox.ok, true, s.sandbox.detail);
   for (const v of Object.values(s.languages)) assert.match(v, /^\d+\./);
   assert.equal(s.providers.length, 2);
-  assert.equal((await call('GET', '/api/options')).json.subjects.length, 7);
+  assert.equal(Object.keys((await call('GET', '/api/options')).json.groups).length, 4);
 });
 
 test('requests from other sites and malformed requests are refused', async () => {

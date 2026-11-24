@@ -136,7 +136,8 @@ test('trace records real values at each line, survives errors and is capped', as
   const bad = await run('def f(xs):\n    return xs[9]\n');
   assert.match(bad.results[0].error, /IndexError/);
   assert.ok(bad.trace.some((s) => s.event === 'exception'));
-  assert.equal((await run('def f(xs):\n    t = 0\n    for i in range(5000): t += i\n    return t\n')).trace.length, 400);
+  const long = await run('def f(xs):\n    t = 0\n    for i in range(5000): t += i\n    return t\n');
+  assert.ok(long.trace.length === 400 && long.traceCut && !r.traceCut);
   assert.equal((await run('def f(xs):\n    while True: pass\n')).results[0].status, 'timeout');
   assert.equal((await run('const f = (xs) => xs.length', [[1]], 'javascript')).trace, undefined);
   assert.equal((await runCode({ language: 'python', code: 'def f(xs):\n    return 1\n', signature, cases: [{ args: [[]] }] })).trace, undefined);

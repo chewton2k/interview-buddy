@@ -55,6 +55,7 @@ test('drawings are saved beside the set, checked and deleted with it', async () 
   await saveDrawing(id, pid, [{ id: 'a' }]);
   assert.deepEqual(await readDrawing(id, pid), { elements: [{ id: 'a' }] });
   await assert.rejects(saveDrawing(id, pid, 'x'), /too large|save/);
+  await assert.rejects(saveDrawing(id, '00000000-0000-4000-8000-00000000abcd', []));
   await assert.rejects(saveDrawing(id, pid, ['x'.repeat(4 << 20)]), /too large/);
   for (const bad of ['../x', '', 'nope']) await assert.rejects(readDrawing(id, bad));
   const folder = path.join(home(), 'drawings', id);

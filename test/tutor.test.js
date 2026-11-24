@@ -161,7 +161,7 @@ test('analysis of Python uses the recorded run of the smallest failing test', as
   await call('POST', `${at}/analyze`, { language: 'python', code: mine });
   assert.equal((await call('POST', `${at}/analyze`, { language: 'python', code: mine })).status, 400);
   const [p] = (await settled(id)).problems;
-  assert.deepEqual([p.visual.status, p.visual.recorded, p.visual.summary, p.visual.html, p.visual.data], ['ready', true, 'sum', undefined, undefined]);
+  assert.deepEqual([p.visual.status, p.visual.recorded, p.visual.summary, p.visual.html, p.visual.data], ['ready', 'all', 'sum', undefined, undefined]);
   const { data } = (await readSet(id)).problems[0].visual;
   assert.deepEqual([data.input, data.expected, data.actual, data.passed, data.total], [{ x: 99 }, 198, 0, 5, 6]);
   assert.ok(data.trace.some((s) => s.vars.y === 100));
@@ -193,13 +193,20 @@ test('analysis covers a correct run, other languages, broken code and other kind
     return (await settled(id), (await readSet(id)).problems[0].visual);
   };
   let v = await run({ language: 'python', code: 'def twice(x):\n    return x * 2' });
-  assert.deepEqual([v.data.passed, v.recorded, v.data.expected], [6, true, 2]);
+  assert.deepEqual([v.data.passed, v.recorded, v.data.expected], [6, 'all', 2]);
   v = await run({ language: 'javascript', code: 'const twice = (x) => 2 * x' });
-  assert.deepEqual([v.data.passed, v.recorded], [6, false]);
+  assert.deepEqual([v.data.passed, v.recorded], [6, '']);
   v = await run({ language: 'python', code: 'def twice(' });
-  assert.ok(v.recorded === false && /SyntaxError/.test(v.data.error));
-  v = await run({ language: 'python', code: 'def twice(x):\n    s = "a" * 100\n    t = [s] * 40\n    for i in range(300): t[i % 40] = str(i) * 30\n    return x * 2' });
-  assert.ok(v.data.trace.length > 300 && calls()[0].prompt.length < 60000);
+  assert.ok(v.recorded === '' && /SyntaxError/.test(v.data.error));
+  v = await run({ language: 'python', code: 'def twice(x):\n    s = "a" * 100\n    t = [s] * 40\n    for i in range(900): t[i % 40] = str(i) * 30\n    return x * 2' });
+  assert.ok(v.data.trace.length === 400 && v.recorded === 'start' && calls()[0].prompt.length < 60000);
+  assert.match(calls()[0].prompt, /stops at 400 events/);
+  clearCalls();
+  replies([{ match: 'interactive picture', exit: 'usage limit' }]);
+  await call('POST', `${at}/analyze`, { language: 'python', code: 'def twice(x):\n    return 1' });
+  await settled(id);
+  const kept = (await readSet(id)).problems[0].visual;
+  assert.ok(kept.status === 'ready' && kept.html && /usage limit/.test(kept.error) && kept.data.trace.length === 400);
   assert.equal((await call('POST', `${at}/analyze`, { language: 'ruby', code: '' })).status, 400);
 
   for (const [kind, reply] of [['numeric', numeric()], ['written', written()]]) {

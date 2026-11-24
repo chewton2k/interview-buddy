@@ -71,6 +71,7 @@ function cppLiteral(v, t) {
 }
 
 export function starter(language, { name, params, returns }) {
+  if (language === 'sql') return 'SELECT\n';
   if (language === 'python') return `def ${name}(${params.map((p) => `${p.name}: ${pyType(p.type)}`).join(', ')}) -> ${pyType(returns)}:\n    pass\n`;
   if (language === 'javascript') {
     const doc = [...params.map((p) => ` * @param {${jsType(p.type)}} ${p.name}`), ` * @returns {${jsType(returns)}}`].join('\n');
@@ -129,7 +130,7 @@ for _args in _spec["args"]:
         import traceback
         _tb = [f for f in traceback.extract_tb(e.__traceback__) if f.filename.endswith("solution.py")]
         _emit({"error": type(e).__name__ + ": " + str(e) + (f" (line {_tb[-1].lineno})" if _tb else "")})
-    if _spec["trace"]: _emit({"trace": _steps})
+    if _spec["trace"]: _emit({"trace": _steps, "cut": len(_steps) >= 400})
     sys.stdout.flush()
 `;
 
@@ -212,10 +213,23 @@ int main() {
 }
 `;
 
+const SQL_WRAP = (sql) => `import json, sqlite3
+SQL = json.loads(${JSON.stringify(JSON.stringify(sql)).replace(/[\u007f-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)})
+def _text(v):
+    if v is None: return "NULL"
+    if isinstance(v, float): return str(int(v)) if v == int(v) else format(v, ".6g")
+    return str(v)
+def query(data):
+    db = sqlite3.connect(":memory:")
+    db.executescript(data)
+    return [[_text(v) for v in row] for row in db.execute(SQL).fetchall()]
+`;
+
 // Files to write, an optional compile step and the run command for one language.
 export function build(language, code, signature, cases, trace = false) {
   const spec = JSON.stringify({ name: signature.name, args: cases, trace });
   if (language === 'python') return { files: { 'solution.py': code, 'main.py': PY_MAIN, 'spec.json': spec }, run: ['python3', '-B', 'main.py'] };
+  if (language === 'sql') return build('python', SQL_WRAP(code), signature, cases);
   if (language === 'javascript') return { files: { 'solution.js': code, 'main.cjs': JS_MAIN(signature.name), 'spec.json': spec }, run: ['node', 'main.cjs'] };
   if (language === 'cpp') return { files: { 'solution.cpp': code, 'main.cpp': CPP_MAIN(signature, cases) }, compile: ['clang++', '-std=c++20', '-O1', '-w', 'main.cpp', '-o', 'main'], run: ['./main'] };
   throw new Error(`Unknown language ${language}`);

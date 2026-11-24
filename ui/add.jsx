@@ -26,7 +26,7 @@ export function AddProblem({ setId, subjects = [], onAdded }) {
       <div class="row wrap">
         <select class="input auto" aria-label="Subject" value={subject} onChange={(e) => setSubject(e.target.value)}>
           <option value="">Any subject</option>
-          {[...new Set([...(options?.subjects ?? []), ...subjects])].map((s) => <option key={s}>{s}</option>)}
+          {[...new Set([...Object.values(options?.groups ?? {}).flat(), ...subjects])].map((s) => <option key={s}>{s}</option>)}
         </select>
         <button class="btn" disabled={make.busy}>
           <Icon name="plus" />

@@ -71,20 +71,44 @@ function get(url, { block, signal }) {
 }
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', ndash: '-', mdash: '-', times: '×', minus: '-', le: '≤', ge: '≥' };
+const SKIP = new Set(['script', 'style', 'noscript', 'svg', 'head', 'nav', 'footer', 'template']);
+const BREAK = new Set(['br', 'p', 'div', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'tr', 'pre']);
+// One forward scan, so a hostile page cannot stall the server with a slow pattern.
 export function htmlToText(html) {
-  return html
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<(script|style|noscript|svg|head|nav|footer|template)\b[\s\S]*?<\/\1\s*>/gi, ' ')
-    .replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr|\/pre)\b[^>]*>/gi, '\n')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&(#x[0-9a-f]{1,6}|#\d{1,7}|\w+);/gi, (m, e) => {
+  const lower = html.toLowerCase();
+  const after = (s, from) => {
+    const at = lower.indexOf(s, from);
+    return at < 0 ? html.length : at + s.length;
+  };
+  const out = [];
+  let i = 0;
+  while (i < html.length) {
+    const lt = html.indexOf('<', i);
+    if (lt < 0) out.push(html.slice(i));
+    if (lt < 0) break;
+    out.push(html.slice(i, lt));
+    const tag = /^<(\/?)([a-z][a-z0-9]*)/.exec(lower.slice(lt, lt + 16));
+    if (lower.startsWith('<!--', lt)) i = after('-->', lt + 4);
+    else if (!tag) {
+      out.push('<');
+      i = lt + 1;
+    } else {
+      i = after('>', lt);
+      if (!tag[1] && SKIP.has(tag[2])) i = after('>', after(`</${tag[2]}`, i));
+      else out.push(BREAK.has(tag[2]) ? '\n' : ' ');
+    }
+  }
+  return out
+    .join('')
+    .replace(/&(#x[0-9a-f]{1,6}|#\d{1,7}|\w{1,12});/gi, (m, e) => {
       if (e[0] !== '#') return ENTITIES[e.toLowerCase()] ?? m;
       const n = /^#x/i.test(e) ? parseInt(e.slice(2), 16) : Number(e.slice(1));
       return n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : m;
     })
-    .replace(/[ \t\r\f\v]+/g, ' ')
-    .replace(/ *\n\s*/g, '\n')
-    .trim();
+    .split('\n')
+    .map((l) => l.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n');
 }
 
 export const findLinks = (text) => [...new Set((text.match(/\bhttps?:\/\/[^\s<>"'`\])}]+/gi) ?? []).map((u) => u.replace(/[.,;:!?]+$/, '')))].slice(0, 3);

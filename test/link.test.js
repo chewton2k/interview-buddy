@@ -52,6 +52,15 @@ test('never reaches this computer or its network', async () => {
   for (const u of [`${at}/ok`, at.replace('127.0.0.1', 'localhost') + '/ok', at.replace('127.0.0.1', '[::ffff:127.0.0.1]') + '/ok', at.replace('127.0.0.1', '2130706433') + '/ok']) await assert.rejects(fetchPage(u), /inside this computer/, u);
 });
 
+test('hostile pages are read in linear time', () => {
+  for (const s of ['<script ', '<!--', '<', '<a ', '</', '&#', ' \n']) {
+    const start = performance.now();
+    htmlToText(s.repeat(250000));
+    assert.ok(performance.now() - start < 1500, s);
+  }
+  assert.equal(htmlToText('a <b>bold</b> 1 < 2 <script>x<b></script>c<br/>d<!-- <p> -->e<SCRIPT>y'), 'a bold 1 < 2 c\nde');
+});
+
 test('a redirect to a blocked address is refused', async () => {
   const onlyFirst = new net.BlockList();
   onlyFirst.addAddress('::1', 'ipv6');

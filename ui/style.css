@@ -181,8 +181,14 @@ a.back:hover { color: var(--text); }
 .preview { border-left: 2px solid var(--line); padding: 4px 0 4px 12px; }
 .equation { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; align-items: center; }
 .field-host { min-height: 48px; }
-math-field { display: block; width: 100%; font-size: 20px; padding: 4px 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--card); color: var(--text); --caret-color: var(--text); --selection-background-color: var(--mark); --selection-color: var(--mark-text); --contains-highlight-background-color: transparent; --hue: 0; --primary: var(--text); }
+math-field { display: block; width: 100%; font-size: 20px; padding: 4px 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--card); color: var(--text); --caret-color: var(--text); --selection-background-color: var(--mark); --selection-color: var(--mark-text); --contains-highlight-background-color: transparent; }
+math-field::part(menu-toggle), math-field::part(virtual-keyboard-toggle) { color: var(--second); }
 math-field:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
+.group { display: grid; gap: 4px; }
+.work.interface { grid-template-rows: auto minmax(200px, 5fr) minmax(240px, 6fr); }
+.preview-frame { width: 100%; height: 280px; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; resize: vertical; }
+.canvas .excalidraw { --color-primary: var(--ink); --color-primary-darker: var(--ink); --color-primary-darkest: var(--ink); --color-primary-hover: var(--ink-hover); --color-primary-light: var(--raised); --color-primary-light-darker: var(--line); --color-surface-primary-container: var(--raised); --color-on-primary-container: var(--text); --color-surface-low: var(--raised); --color-brand-hover: var(--ink-hover); --color-brand-active: var(--ink); --color-selection: var(--focus); --color-surface-high: var(--raised); }
+.canvas .excalidraw .default-sidebar-trigger, .canvas .excalidraw .sidebar-trigger { display: none; }
 .draw { display: grid; gap: 8px; }
 .canvas { height: max(420px, calc(100vh - 360px)); border: 1px solid var(--line-strong); border-radius: 12px; overflow: hidden; }
 .work.plain > .stack:has(.draw) { max-width: none; }

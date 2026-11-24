@@ -113,8 +113,8 @@ async function run({ language, code, signature, cases, compare = 'exact', timeou
   if (bad) return fail(bad);
   const misfit = cases.findIndex((c) => !Array.isArray(c.args) || c.args.length !== signature.params.length || !c.args.every((a, i) => fits(a, signature.params[i].type)));
   if (misfit >= 0) return fail(`Test ${misfit + 1} does not match the function signature`);
-  const tool = (await tools())[language];
-  if (!tool) return unavailable(language === 'python' ? 'python3 was not found. Install Python 3 and restart.' : 'clang++ was not found. Run xcode-select --install and restart.');
+  const tool = (await tools())[language === 'sql' ? 'python' : language];
+  if (!tool) return unavailable(language !== 'cpp' ? 'python3 was not found. Install Python 3 and restart.' : 'clang++ was not found. Run xcode-select --install and restart.');
 
   const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), PREFIX)));
   try {
@@ -131,12 +131,13 @@ async function run({ language, code, signature, cases, compare = 'exact', timeou
     const lines = r.channel.split('\n').filter(Boolean);
     const parsed = [];
     let steps;
+    let traceCut = false;
     let started = false;
     for (const line of lines) {
       try {
         const o = JSON.parse(line);
         if (o.start) started = true;
-        else if (o.trace) steps = o.trace;
+        else if (o.trace) [steps, traceCut] = [o.trace, o.cut];
         else parsed.push(o);
       } catch {
         break;
@@ -152,7 +153,7 @@ async function run({ language, code, signature, cases, compare = 'exact', timeou
       if (!fits(p.value, signature.returns)) return { status: 'fail', actual: p.value, ms: p.ms, error: `Expected a value of type ${signature.returns}` };
       return { status: 'expected' in c && !same(p.value, c.expected, compare) ? 'fail' : 'pass', actual: p.value, ms: p.ms };
     });
-    return { results, stdout: r.stdout, compileError: null, trace: steps };
+    return { results, stdout: r.stdout, compileError: null, trace: steps, traceCut };
   } finally {
     await discard(dir);
   }

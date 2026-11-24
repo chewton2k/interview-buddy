@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Draw } from './draw.jsx';
+import { InterfaceWork } from './interface.jsx';
 import { Notes } from './notes.jsx';
 import { Analysis } from './analysis.jsx';
 import { Chat } from './chat.jsx';
@@ -7,8 +8,9 @@ import { Editor } from './editor.jsx';
 import { api, Icon, Line, Problem, Prose, useAction, useDebounced, useSet } from './lib.jsx';
 
 const LANGUAGES = { python: 'Python', javascript: 'JavaScript', cpp: 'C++' };
-const CHECKED = { code: 'Tests checked by two independent solutions', numeric: 'Answer checked by a solver', written: 'Graded on a rubric' };
-const show = (v) => (v === undefined ? 'Nothing' : JSON.stringify(v));
+const CHOICES = { code: LANGUAGES, sql: { sql: 'SQL' } };
+const CHECKED = { code: 'Tests checked by two independent solutions', numeric: 'Answer checked by a solver', written: 'Graded on a rubric', sql: 'Tests checked by two independent queries', ui: 'Checks run in your browser' };
+const show = (v) => (v === undefined ? 'Nothing' : typeof v === 'string' && v.includes('\n') ? v : Array.isArray(v?.[0]) && typeof v[0][0] === 'string' ? v.map((r) => r.join(', ')).join('\n') : JSON.stringify(v));
 const MARKS = { met: ['good', 'Met'], partial: ['second', 'Partial'], missed: ['bad', 'Missed'] };
 
 const Figure = ({ svg }) => svg ? <img class="figure" alt="Figure for this problem" src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`} /> : null;
@@ -110,7 +112,7 @@ function Feedback({ feedback }) {
 
 function CodeWork({ problem, at, work, analyze }) {
   const { body, draft } = problem;
-  const [language, setLanguage] = useState(draft.language ?? 'python');
+  const [language, setLanguage] = useState(CHOICES[problem.kind][draft.language] ? draft.language : Object.keys(CHOICES[problem.kind])[0]);
   const [code, setCode] = useState({ ...problem.starters, ...draft.code });
   const [shown, setShown] = useState(null);
   const [pick, setPick] = useState(0);
@@ -132,14 +134,14 @@ function CodeWork({ problem, at, work, analyze }) {
     setFeedback((await api('POST', `${at}/feedback`, { answer: code[language], outcome: outcome.outcome })).feedback);
   });
   const result = shown?.results[pick];
-  const outcome = { language, code: code[language], outcome: shown?.language === language && shown.code === code[language] ? `${passed} of ${shown.results.length} ${shown.how === 'run' ? 'examples' : 'tests'} pass in ${LANGUAGES[language]}` : '' };
+  const outcome = { language, code: code[language], outcome: shown?.language === language && shown.code === code[language] ? `${passed} of ${shown.results.length} ${shown.how === 'run' ? 'examples' : 'tests'} pass in ${CHOICES[problem.kind][language]}` : '' };
   work.current = () => outcome;
   const busy = run.busy || ask.busy;
   return (
     <section class="work" aria-label="Your solution">
       <div class="bar">
         <select class="input" aria-label="Language" value={language} onChange={(e) => change(e.target.value, code)}>
-          {Object.entries(LANGUAGES).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          {Object.entries(CHOICES[problem.kind]).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
         </select>
         <button
           class="btn bare"
@@ -249,22 +251,23 @@ function TextWork({ problem, at, work, analyze }) {
   work.current = async () => ({ answer, working, outcome, ...(await sketch()) });
   return (
     <section class="work plain" aria-label="Your answer">
-      <form
-        class="stack"
-        onSubmit={(e) => {
-          e.preventDefault();
-          (numeric ? check : ask).run();
-        }}
-      >
+      <div class="stack">
         {numeric && (
-          <div class="field">
+          <form
+            id="number"
+            class="field"
+            onSubmit={(e) => {
+              e.preventDefault();
+              check.run();
+            }}
+          >
             <label for="answer">Your answer</label>
             <div class="answer">
               <input id="answer" class="input" required autoComplete="off" maxLength={100} value={answer} onInput={(e) => edit(e.target.value, working)} aria-describedby="formats" />
               <Line text={body.unit} />
             </div>
             <span class="hint" id="formats">Decimals, 1.2e-3, fractions and percent all work</span>
-          </div>
+          </form>
         )}
         <div class="field">
           <div class="row between wrap">
@@ -291,7 +294,7 @@ function TextWork({ problem, at, work, analyze }) {
           {mode === 'write' && elements?.length > 0 && <span class="hint">Your drawing is included too</span>}
         </div>
         <div class="row wrap">
-          {numeric && <button class="btn primary" disabled={check.busy}>Check answer</button>}
+          {numeric && <button form="number" class="btn primary" disabled={check.busy}>Check answer</button>}
           <button type="button" class={`btn ${numeric ? '' : 'primary'}`} disabled={ask.busy} onClick={() => ask.run()}>
             {ask.busy && <Icon name="load" />}
             {numeric ? 'Get feedback' : 'Grade answer'}
@@ -312,7 +315,7 @@ function TextWork({ problem, at, work, analyze }) {
             </div>
           )}
         </div>
-      </form>
+      </div>
     </section>
   );
 }
@@ -363,7 +366,7 @@ export function ProblemPage({ params: [id, pid] }) {
       localStorage.setItem('ask', state);
     } catch {}
   };
-  const Work = problem.kind === 'code' ? CodeWork : TextWork;
+  const Work = { code: CodeWork, sql: CodeWork, ui: InterfaceWork }[problem.kind] ?? TextWork;
   const tabs = { problem: 'Problem', analysis: 'Analysis' };
   return (
     <div class={`bench ${ask === 'open' ? 'asking' : ''} ${tab}`}>
@@ -391,7 +394,7 @@ export function ProblemPage({ params: [id, pid] }) {
           {tab === 'problem' ? <Brief set={set} problem={problem} /> : <Analysis problem={problem} at={at} analyze={analyze} reload={load} />}
         </div>
       </section>
-      <Work problem={problem} at={at} work={work} analyze={analyze} />
+      <Work problem={problem} at={at} work={work} analyze={analyze} Feedback={Feedback} />
       {ask === 'open' && <Chat setId={id} problem={problem} at={at} work={work} reload={load} onClose={() => show('closed')} />}
     </div>
   );

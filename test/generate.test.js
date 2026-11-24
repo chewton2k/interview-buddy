@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { brief, calls, clearCalls, code, intake, numeric, replies, written } from './stub/setup.js';
+import { brief, calls, clearCalls, code, intake, numeric, replies, sql, ui, written } from './stub/setup.js';
 import { checkNumber, findQuote, parseNumber } from '../src/answers.js';
 import { checkIntake, createSet, grade, recoverInterrupted, retryProblem, retrySet, stopSet, SUBJECTS, writeProblem } from '../src/generate.js';
 import { createSetFile, deleteSet, readSet, updateProblem, updateSet } from '../src/store.js';
@@ -55,6 +55,7 @@ const rejected = {
   'missing rubric': { rubric: [] },
   'missing fields': { examples: undefined },
   'string outside ASCII': { params: [{ name: 'x', type: 'string' }], case_args_json: ['["h\u00e9"]'] },
+  'result outside ASCII': { returns: 'string', examples: [{ args_json: '[65]', expected_json: '"A"', explanation: '' }, { args_json: '[66]', expected_json: '"B"', explanation: '' }], case_args_json: ['[67]', '[68]', '[69]', '[70]', '[233]'], solution_python: 'def twice(x):\n    return chr(x)', brute_python: 'def twice(x):\n    return bytes([x]).decode("latin1")' },
   'name that C++ reserves': { function_name: 'compl', solution_python: 'def compl(x):\n    return x * 2', brute_python: 'def compl(x):\n    return x + x' },
   'name that C++ already defines': { function_name: 'abs', solution_python: 'def abs(x):\n    return x * 2', brute_python: 'def abs(x):\n    return x + x' },
   'non-text hint': { hints: [1, 2, 3] },
@@ -209,4 +210,24 @@ test('a computer that cannot run code is reported once, without more model calls
   } finally {
     Object.defineProperty(process, 'platform', platform);
   }
+});
+
+test('SQL problems need two queries that agree on every dataset', async () => {
+  const b = await tryWrite([write(sql())], brief({ kind: 'sql' }));
+  assert.deepEqual(b.cases.map((c) => c.expected), [[['a', '3']], [], [['a', '1'], ['b', 'NULL']], [['x', '1.5']]]);
+  assert.equal(b.compare, 'unordered');
+  for (const [over, re] of [
+    [{ second_sql: 'SELECT name, MAX(v) FROM t GROUP BY name' }, /dataset 1 reference_sql returned/],
+    [{ reference_sql: 'SELECT nope FROM t' }, /no such column/],
+    [{ reference_sql: 'SELECT 1; DROP TABLE t' }, /reference_sql failed/],
+    [{ datasets: ['', '', ''] }, /fewer than 4/],
+    [{ datasets: ['', "INSERT INTO t VALUES('a',1)", "INSERT INTO t VALUES('a',2)", "INSERT INTO t VALUES('b',1)"] }, /at least one row/],
+    [{ datasets: ["INSERT INTO t VALUES('\u00e9',1)", '', 'x', 'y'] }, /ASCII/],
+  ]) await assert.rejects(tryWrite([write(sql(over))], brief({ kind: 'sql' })), re);
+});
+
+test('interface problems need a reference and checks that parse', async () => {
+  const b = await tryWrite([write(ui())], brief({ kind: 'ui' }));
+  assert.deepEqual([b.checks.length, b.starter, b.solutionCode], [3, '<p>start</p>', '<button>Go</button>']);
+  for (const [over, re] of [[{ checks: [] }, /fewer than 3/], [{ checks: [{ name: 'a', js: 'assert(' }, { name: 'b', js: '' }, { name: 'c', js: '' }] }, /does not parse/], [{ reference_html: ' ' }, /full page/]]) await assert.rejects(tryWrite([write(ui(over))], brief({ kind: 'ui' })), re);
 });

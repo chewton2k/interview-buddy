@@ -1,9 +1,10 @@
 import { addProblem, data, obj, str, tracked } from './generate.js';
 import { dropLinks, findLinks } from './link.js';
 import { ask, ProviderError } from './providers.js';
-import { runCode } from './sandbox.js';
+import { LANGUAGES, runCode } from './sandbox.js';
 import { checkDrawing, Invalid, readSet, readSettings, updateProblem } from './store.js';
 
+const RUNS = ['code', 'sql'];
 const HTML_LIMIT = 200000;
 const need = (v, name, max) => {
   if (v === undefined) return '';
@@ -72,7 +73,7 @@ async function codeEvidence({ body }, { language, code }) {
   const base = { language, code, input: Object.fromEntries(signature.params.map((p, k) => [p.name, c.args[k]])), expected: c.expected, actual: all.results[i].actual, error: all.compileError ?? all.results[i].error, passed: order.length - failing.length, total: order.length };
   if (language !== 'python' || all.compileError) return { ...base, trace: [] };
   const one = await runCode({ language, code, signature, cases: [c], compare, trace: true });
-  return { ...base, trace: one.trace ?? [] };
+  return { ...base, trace: one.trace ?? [], trace_cut: one.traceCut ? 'The recording stops at 400 events, before the run ended. Say so and do not draw the end of the run as if it was recorded.' : undefined };
 }
 
 const visualSchema = obj({ summary: str, html: str });
@@ -95,18 +96,20 @@ const IDEAS = `Examples of the level expected. Yield: the round wafer with every
 
 function visualPrompt(problem, evidence, fix) {
   const rules =
-    problem.kind === 'code'
+    problem.kind === 'code' || problem.kind === 'sql'
       ? evidence.trace.length
         ? 'Step through Stage.trace, which was recorded from the real run. Never invent values. Show the code with Stage.code next to the picture and keep both in step. Group consecutive trace events into meaningful steps when there are more than 40. If the run is wrong or fails, make the exact step where it goes wrong unmistakable and show what was expected.'
         : 'No line by line recording exists for this run, so work the real input through the code by hand, stay faithful to what the code does, and end at the real result. If it does not compile or is unfinished, show the idea it is missing on the real input.'
-      : 'Show the reasoning in the working, in order, and make the first place it departs from a correct argument unmistakable. Let the candidate vary the givens with sliders that start at the values in the statement, recompute from the real relations, and mark both their answer and the correct one. If they drew something, redraw it cleanly as the base of the picture. If they wrote and drew nothing yet, show the setup and how the quantities relate without stating the final answer.';
+      : problem.kind === 'ui'
+        ? 'Show how their interface behaves: its states, what each user action changes, the path of events, and the layout boxes that matter. Make the first failing check or missing state unmistakable. Rebuild their interface in the picture rather than describing it.'
+        : 'Show the reasoning in the working, in order, and make the first place it departs from a correct argument unmistakable. Let the candidate vary the givens with sliders that start at the values in the statement, recompute from the real relations, and mark both their answer and the correct one. If they drew something, redraw it cleanly as the base of the picture. If they wrote and drew nothing yet, show the setup and how the quantities relate without stating the final answer.';
   return `Build one interactive picture that explains this candidate's own solution to them. ${IDEAS}
 ${rules}
 ${STYLE}
 ${KIT}
 summary is two or three plain sentences: what their solution does, whether it holds up and why, and for code its time and space cost. Use $...$ for math.
 ${data({ problem: { title: problem.title, subject: problem.subject, ...known(problem.body) }, candidate: evidence })}
-${fix ? `The previous version failed in the frame with: ${fix.error}\nReturn the whole corrected version.\n${data({ previous_html: fix.html })}` : ''}`;
+${fix ? `The previous version failed in the frame with the error below. Return the whole corrected version.\n${data({ error: fix.error, previous_html: fix.html })}` : ''}`;
 }
 
 // The prompt gets a shortened trace. The frame gets all of it.
@@ -123,15 +126,15 @@ function draw(setId, pid, evidenceOf, fix, drawing) {
     try {
       const { problem } = await find(setId, pid);
       const evidence = await evidenceOf(problem);
-      await put({ step: fix ? 'Fixing the drawing' : 'Drawing', data: evidence });
+      await put({ step: fix ? 'Fixing the drawing' : 'Drawing' });
       const { tutor } = await readSettings();
       const r = await ask({ ...tutor, prompt: visualPrompt(problem, brief(evidence), fix) + seen(drawing), images: drawing ? [drawing.png] : [], schema: visualSchema, signal: job.signal });
       if (!r.html.trim()) throw new ProviderError('badjson', 'The model did not return a drawing. Try again.');
       if (r.html.length > HTML_LIMIT) throw new ProviderError('badjson', 'The drawing was too large. Try again.');
-      await put({ status: 'ready', step: null, summary: r.summary, html: r.html, recorded: Boolean(evidence.trace?.length), repaired: Boolean(fix), version: Date.now() });
+      await put({ status: 'ready', step: null, error: '', data: evidence, summary: r.summary, html: r.html, recorded: evidence.trace?.length ? (evidence.trace_cut ? 'start' : 'all') : '', repaired: Boolean(fix), version: Date.now() });
     } catch (e) {
       if (job.signal.aborted) return;
-      await put({ status: 'failed', step: null, error: e.message });
+      await updateProblem(setId, pid, (p) => void Object.assign(p.visual, { status: p.visual.html ? 'ready' : 'failed', step: null, error: e.message }));
     }
   });
 }
@@ -142,10 +145,11 @@ export async function analyze(setId, pid, body) {
   await updateProblem(setId, pid, (p) => {
     ready(p);
     if (p.visual?.status === 'working') throw new Invalid('The drawing is already being made');
-    if (p.kind === 'code' && !['python', 'javascript', 'cpp'].includes(now.language)) throw new Invalid('Choose a language');
-    p.visual = { status: 'working', step: p.kind === 'code' ? 'Running your code' : 'Reading your work', error: '' };
+    if (p.kind === 'sql') now.language = 'sql';
+    if (p.kind === 'code' && !LANGUAGES.includes(now.language)) throw new Invalid('Choose a language');
+    p.visual = { ...p.visual, status: 'working', step: RUNS.includes(p.kind) ? 'Running your code' : 'Reading your work', error: '' };
   });
-  draw(setId, pid, (p) => (p.kind === 'code' ? codeEvidence(p, now) : { answer: now.answer, working: now.working, outcome: now.outcome, drawing: now.drawing?.outline, correct: p.body.answer, unit: p.body.unit }), null, now.drawing);
+  draw(setId, pid, (p) => (RUNS.includes(p.kind) ? codeEvidence(p, now) : p.kind === 'ui' ? { language: 'html', code: now.code, outcome: now.outcome } : { answer: now.answer, working: now.working, outcome: now.outcome, drawing: now.drawing?.outline, correct: p.body.answer, unit: p.body.unit }), null, now.drawing);
 }
 
 /** One automatic second try when the frame reports an error. */

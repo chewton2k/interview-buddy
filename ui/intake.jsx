@@ -65,19 +65,26 @@ export function Intake() {
           </div>
           <fieldset class="field">
             <legend>Subjects</legend>
+            {Object.entries(options?.groups ?? {}).map(([group, subjects]) => (
+              <div class="group" key={group} role="group" aria-label={group}>
+                <span class="small muted">{group}</span>
+                <div class="chips">
+                  {subjects.map((s) => (
+                    <label class="chip" key={s}>
+                      <input type="checkbox" checked={form.subjects.includes(s)} onChange={() => toggle(s)} />
+                      <span>{s}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
             <div class="chips">
-              {options?.subjects.map((s) => (
-                <label class="chip" key={s}>
-                  <input type="checkbox" checked={form.subjects.includes(s)} onChange={() => toggle(s)} />
-                  <span>{s}</span>
-                </label>
-              ))}
               <label class="chip">
                 <input type="checkbox" checked={other !== null} onChange={() => setOther(other === null ? '' : null)} />
                 <span>Other</span>
               </label>
             </div>
-            {other !== null && <input class="input" aria-label="Other subjects" placeholder="System design, statistics" maxLength={200} value={other} onInput={(e) => setOther(e.target.value)} />}
+            {other !== null && <input class="input" aria-label="Other subjects" placeholder="Security, game design" maxLength={200} value={other} onInput={(e) => setOther(e.target.value)} />}
           </fieldset>
           <div class="pair keep">
             <div class="field">

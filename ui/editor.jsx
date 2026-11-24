@@ -1,7 +1,9 @@
 import { indentWithTab } from '@codemirror/commands';
 import { cpp } from '@codemirror/lang-cpp';
+import { html } from '@codemirror/lang-html';
 import { javascript } from '@codemirror/lang-javascript';
 import { python } from '@codemirror/lang-python';
+import { SQLite, sql } from '@codemirror/lang-sql';
 import { HighlightStyle, indentUnit, syntaxHighlighting } from '@codemirror/language';
 import { EditorState, Prec } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
@@ -9,7 +11,7 @@ import { tags as t } from '@lezer/highlight';
 import { basicSetup } from 'codemirror';
 import { useEffect, useRef } from 'preact/hooks';
 
-const MODES = { python, javascript, cpp };
+const MODES = { python, javascript, cpp, html, sql: () => sql({ dialect: SQLite }) };
 const style = HighlightStyle.define([
   { tag: [t.keyword, t.operatorKeyword, t.controlKeyword, t.definitionKeyword, t.moduleKeyword, t.modifier], fontWeight: '700' },
   { tag: [t.string, t.special(t.string), t.character], color: 'var(--good)' },

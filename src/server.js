@@ -3,7 +3,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkNumber } from './answers.js';
-import { addProblem, checkRequest, createSet, grade, LEVELS, personalSet, retryProblem, retrySet, stopSet, SUBJECTS } from './generate.js';
+import { addProblem, checkRequest, createSet, grade, GROUPS, LEVELS, personalSet, retryProblem, retrySet, stopSet } from './generate.js';
 import { starter } from './harness.js';
 import { findLinks } from './link.js';
 import { ping, ProviderError, providerStatus } from './providers.js';
@@ -15,6 +15,7 @@ const DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2' };
 const CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const FRAME_CSP = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
+const EDITORS = [...LANGUAGES, 'sql', 'html'];
 const BODY_LIMIT = 6 << 20;
 
 class HttpError extends Error {
@@ -74,21 +75,22 @@ async function readyProblem(setId, pid) {
 const advance = (solved) => (p) => {
   if (p.progress !== 'solved') p.progress = solved ? 'solved' : 'tried';
 };
-const kindOnly = (problem, kind) => {
-  if (problem.kind !== kind) throw new Invalid('That does not apply to this kind of problem');
+const kindOnly = (problem, ...kinds) => {
+  if (!kinds.includes(problem.kind)) throw new Invalid('That does not apply to this kind of problem');
 };
 
 async function runFor(setId, pid, body, examplesOnly) {
   const problem = await readyProblem(setId, pid);
-  kindOnly(problem, 'code');
-  if (!LANGUAGES.includes(body.language)) throw new Invalid('Choose a language');
+  kindOnly(problem, 'code', 'sql');
+  const language = problem.kind === 'sql' ? 'sql' : body.language;
+  if (language !== 'sql' && !LANGUAGES.includes(language)) throw new Invalid('Choose a language');
   const { signature, compare, cases, exampleCount } = problem.body;
   const chosen = examplesOnly ? cases.slice(0, exampleCount) : cases;
-  return runCode({ language: body.language, code: needText(body.code, 'Code'), signature, cases: chosen, compare });
+  return runCode({ language, code: needText(body.code, 'Code'), signature, cases: chosen, compare });
 }
 
 const routes = [
-  ['GET', /^\/api\/options$/, async () => ({ subjects: SUBJECTS, levels: LEVELS })],
+  ['GET', /^\/api\/options$/, async () => ({ groups: GROUPS, levels: LEVELS })],
   ['GET', /^\/api\/settings$/, async () => ({ settings: await readSettings() })],
   ['GET', /^\/api\/status$/, async () => {
     const [providers, sandbox, found] = await Promise.all([providerStatus(), selfTest(), tools()]);
@@ -106,7 +108,7 @@ const routes = [
   ['POST', /^\/api\/sets$/, async (_, body) => ({ id: (await createSet(body)).id })],
   ['GET', /^\/api\/sets\/([^/]+)$/, async ([id]) => {
     const set = await readSet(id);
-    for (const p of set.problems) if (p.body?.signature) p.starters = Object.fromEntries(LANGUAGES.map((l) => [l, starter(l, p.body.signature)]));
+    for (const p of set.problems) if (p.body?.signature) p.starters = Object.fromEntries((p.kind === 'sql' ? ['sql'] : LANGUAGES).map((l) => [l, starter(l, p.body.signature)]));
     for (const p of set.problems) {
       delete p.source;
       if (p.visual) for (const k of ['html', 'data']) delete p.visual[k];
@@ -135,8 +137,8 @@ const routes = [
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/retry$/, async ([id, pid]) => (await retryProblem(id, pid), {})],
   ['PUT', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/draft$/, async ([id, pid], body) => {
     const draft = {};
-    if (LANGUAGES.includes(body.language)) draft.language = body.language;
-    for (const l of LANGUAGES) if (body.code?.[l] !== undefined) (draft.code ??= {})[l] = needText(body.code[l], 'Code');
+    if (EDITORS.includes(body.language)) draft.language = body.language;
+    for (const l of EDITORS) if (body.code?.[l] !== undefined) (draft.code ??= {})[l] = needText(body.code[l], 'Code');
     for (const k of ['answer', 'working']) if (body[k] !== undefined) draft[k] = needText(body[k], 'Your answer');
     await updateProblem(id, pid, (p) => void (p.draft = draft));
     return {};
@@ -156,6 +158,12 @@ const routes = [
     if (correct === null) throw new Invalid('Type a number such as 0.25, 1.2e-3, 1/4 or 25%');
     await updateProblem(id, pid, advance(correct));
     return { correct };
+  }],
+  ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/checked$/, async ([id, pid], body) => {
+    kindOnly(await readyProblem(id, pid), 'ui');
+    if (!Number.isInteger(body.passed) || !Number.isInteger(body.total) || body.total < 1) throw new Invalid('The results could not be read');
+    await updateProblem(id, pid, advance(body.passed === body.total));
+    return {};
   }],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/feedback$/, async ([id, pid], body, signal) => {
     const problem = await readyProblem(id, pid);
@@ -219,6 +227,8 @@ export function createServer() {
       }
       if (req.method !== 'GET') throw new HttpError(405, 'There is nothing at this address');
       const { content, type } = await asset(url);
+      // The preview shows the user's own page, so it gets the same locked policy as an analysis, plus form events.
+      if (url.pathname === '/preview.html') return void res.writeHead(200, { ...headers, 'content-security-policy': FRAME_CSP.replace('allow-scripts', 'allow-scripts allow-forms'), 'content-type': type }).end(content);
       send(200, type, content);
     } catch (e) {
       const status = e.status ?? (e instanceof Invalid ? 400 : e instanceof NotFound ? 404 : e instanceof ProviderError ? STATUS[e.kind] : 500);

@@ -54,10 +54,11 @@ export function Analysis({ problem, at, analyze, reload }) {
       )}
       {ready && (
         <>
+          <Problem>{visual.error}</Problem>
           <Prose text={visual.summary} />
           <iframe key={visual.version} ref={frame} title="Drawing of your solution" sandbox="allow-scripts" src={`/api${at}/visual?v=${visual.version}`} />
           <div class="row wrap between">
-            <span class="small second">{visual.recorded ? 'Recorded from your run' : 'Drawn from your work'}</span>
+            <span class="small second">{{ all: 'Recorded from your run', start: 'First 400 steps recorded from your run' }[visual.recorded] ?? 'Drawn from your work'}</span>
             <span class="row">
               <button class="btn" onClick={() => frame.current.requestFullscreen?.()}>Full screen</button>
               {again}

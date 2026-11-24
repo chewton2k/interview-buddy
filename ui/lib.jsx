@@ -75,7 +75,7 @@ const marked = new Marked({
       level: 'inline',
       start: (s) => s.search(/\$|\\[([]/),
       tokenizer(s) {
-        const m = s.match(/^\$\$([\s\S]+?)\$\$/) ?? s.match(/^\\\[([\s\S]+?)\\\]/) ?? s.match(/^\$((?:\\.|[^$\\])+?)\$/) ?? s.match(/^\\\(([\s\S]+?)\\\)/);
+        const m = s.match(/^\$\$([\s\S]+?)\$\$/) ?? s.match(/^\\\[([\s\S]+?)\\\]/) ?? s.match(/^\$(?!\s)((?:\\.|[^$\\])+?)(?<!\s)\$(?!\d)/) ?? s.match(/^\\\(([\s\S]+?)\\\)/);
         if (m) return { type: 'math', raw: m[0], text: m[1].trim(), display: /^(\$\$|\\\[)/.test(m[0]) };
       },
       renderer: (t) => katex.renderToString(t.text, { displayMode: t.display, throwOnError: false }),
@@ -83,7 +83,7 @@ const marked = new Marked({
   ],
 });
 // KaTeX needs inline sizes. Anything that could move content over the rest of the page is dropped.
-const SAFE_STYLE = /^\s*(height|width|min-width|max-width|margin(-\w+)?|padding(-\w+)?|top|left|vertical-align|border(-\w+)*|color|font-size)\s*:[^;()]*$/i;
+const SAFE_STYLE = /^\s*((height|width|min-width|max-width|margin(-\w+)?|padding(-\w+)?|top|left|vertical-align|font-size|border-\w+-width)\s*:\s*-?\d{0,2}(\.\d+)?em|color\s*:\s*[#\w]+)\s*$/i;
 DOMPurify.addHook('uponSanitizeAttribute', (_, a) => {
   if (a.attrName === 'style') a.attrValue = a.attrValue.split(';').filter((d) => SAFE_STYLE.test(d)).join(';');
 });

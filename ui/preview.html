@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Preview</title>
+  </head>
+  <body>
+    <script>
+      // Waits for one page from the app, shows it, runs its checks and reports back. Every run loads a fresh frame.
+      addEventListener('message', (e) => {
+        if (e.source !== parent || typeof e.data?.html !== 'string') return;
+        const { html, checks } = e.data;
+        const safe = (s) => s.replace(/<\/script/gi, '<\\/script');
+        const list = checks.map((c) => `[${safe(JSON.stringify(c.name)).replace(/</g, '\\u003c')}, async () => {\n${safe(c.js)}\n}]`).join(',\n');
+        const tools = `
+          const problems = [];
+          addEventListener('error', (e) => problems.push(e.message));
+          const wait = (ms = 50) => new Promise((r) => setTimeout(r, ms));
+          const $ = (s) => document.querySelector(s);
+          const $$ = (s) => [...document.querySelectorAll(s)];
+          const assert = (ok, message) => { if (!ok) throw new Error(message || 'Not true'); };
+          const need = (s) => { const n = typeof s === 'string' ? $(s) : s; assert(n, 'Nothing matches ' + s); return n; };
+          const click = async (s) => { need(s).click(); await wait(); };
+          const type = async (s, text) => { const n = need(s); n.focus(); n.value = text; n.dispatchEvent(new Event('input', { bubbles: true })); n.dispatchEvent(new Event('change', { bubbles: true })); await wait(); };
+          const press = async (s, key) => { need(s).dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); await wait(); };`;
+        const runner = `addEventListener('load', async () => {${tools}
+          await wait(100);
+          const results = [];
+          for (const [name, run] of [${list}]) {
+            try {
+              await Promise.race([run(), wait(3000).then(() => { throw new Error('Took longer than 3 seconds'); })]);
+              results.push({ name, ok: true });
+            } catch (e) { results.push({ name, ok: false, error: String(e && e.message || e) }); }
+          }
+          parent.postMessage({ preview: 'done', results, problems }, '*');
+        });`;
+        document.open();
+        document.write(html + '<script>' + runner + '<\/script>');
+        document.close();
+      });
+      parent.postMessage({ preview: 'hello' }, '*');
+    </script>
+  </body>
+</html>

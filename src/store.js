@@ -69,7 +69,8 @@ export const saveDrawing = async (id, pid, elements) => {
   if (!Array.isArray(elements) || JSON.stringify(elements).length > 3 << 20) throw new Invalid('The drawing is too large to save');
   const file = drawingFile(id, pid);
   await locked(id, async () => {
-    await readSet(id);
+    const { problems } = await readSet(id);
+    if (!problems.some((p) => p.id === pid)) throw new NotFound();
     await writeJson(file, { elements });
   });
 };

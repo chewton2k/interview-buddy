@@ -6,6 +6,9 @@ import { ProblemPage } from './problem.jsx';
 import { SetPage, Sets } from './sets.jsx';
 import { Settings } from './settings.jsx';
 
+// The canvas reads this as it loads, and would otherwise fetch fonts from another site.
+window.EXCALIDRAW_ASSET_PATH = '/';
+
 const ROUTES = [
   [/^#\/new$/, Intake],
   [/^#\/settings$/, Settings],

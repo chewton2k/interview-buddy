@@ -6,7 +6,15 @@ import { ask, ProviderError } from './providers.js';
 import { runCode, tools } from './sandbox.js';
 import { createSetFile, ensureSet, Invalid, listSets, readSet, readSettings, updateProblem, updateSet } from './store.js';
 
-export const SUBJECTS = ['Coding', 'Quant', 'Math', 'Physics', 'Chemistry', 'Circuit design', 'System design'];
+export const GROUPS = {
+  Engineering: ['Coding', 'System design', 'Frontend', 'SQL and data', 'Machine learning', 'Circuit design', 'Mechanical'],
+  'Quant and science': ['Quant', 'Math', 'Statistics', 'Physics', 'Chemistry', 'Biology'],
+  'Design and product': ['UI/UX design', 'Product sense'],
+  'Business and people': ['Case study', 'Finance', 'Behavioral'],
+};
+export const SUBJECTS = Object.values(GROUPS).flat();
+const KINDS = ['code', 'numeric', 'written', 'ui', 'sql'];
+const KIND_GUIDE = 'kind is "code" for a function the candidate writes and runs against tests in Python, JavaScript or C++, "sql" for one SQLite query run against several datasets, "ui" for an interface built in HTML, CSS and JavaScript with a live preview and checks, "numeric" for one number as the answer, and "written" for design, derivation, explanation, critique, a case or a story that a rubric grades. In written problems the candidate can write, typeset equations and draw diagrams or wireframes.';
 export const LEVELS = ['Intern', 'New grad', 'Mid', 'Senior'];
 const TYPES = 'int, float, string, bool, and lists of them written int[], string[][] and so on, up to three levels deep';
 const MAX_TRIES = 3;
@@ -16,12 +24,14 @@ const list = (items) => ({ type: 'array', items });
 export const obj = (properties) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
 const oneOf = (...values) => ({ type: 'string', enum: values });
 
-export const planSchema = (subjects) => obj({ problems: list(obj({ title: str, subject: oneOf(...subjects), kind: oneOf('code', 'numeric', 'written'), difficulty: oneOf('Easy', 'Medium', 'Hard'), topic: str, quote: str })) });
+export const planSchema = (subjects) => obj({ problems: list(obj({ title: str, subject: oneOf(...subjects), kind: oneOf(...KINDS), difficulty: oneOf('Easy', 'Medium', 'Hard'), topic: str, quote: str })) });
 const common = { statement: str, hints: list(str), rubric: list(str), solution_text: str };
 export const problemSchema = {
   code: obj({ ...common, function_name: str, params: list(obj({ name: str, type: str })), returns: str, compare: oneOf('exact', 'unordered'), examples: list(obj({ args_json: str, expected_json: str, explanation: str })), case_args_json: list(str), solution_python: str, brute_python: str }),
   numeric: obj({ ...common, figure_svg: str, answer: { type: 'number' }, unit: str, tolerance: { type: 'number' }, solver_python: str }),
   written: obj({ ...common, figure_svg: str }),
+  ui: obj({ ...common, starter_html: str, reference_html: str, checks: list(obj({ name: str, js: str })) }),
+  sql: obj({ ...common, setup_sql: str, datasets: list(str), ordered: { type: 'boolean' }, reference_sql: str, second_sql: str }),
 };
 const gradeSchema = obj({ summary: str, points: list(obj({ mark: oneOf('met', 'partial', 'missed'), note: str })) });
 
@@ -46,15 +56,15 @@ export function checkIntake(b) {
   return { ...intake, level: b.level, count: b.count };
 }
 
-const briefSchema = (subjects) => obj({ title: str, subject: oneOf(...subjects), kind: oneOf('code', 'numeric', 'written'), difficulty: oneOf('Easy', 'Medium', 'Hard'), topic: str });
+const briefSchema = (subjects) => obj({ title: str, subject: oneOf(...subjects), kind: oneOf(...KINDS), difficulty: oneOf('Easy', 'Medium', 'Hard'), topic: str });
 const briefPrompt = (intake, p) => `A candidate asked for one practice problem. Plan it.
-kind is "code" for a function run against tests, "numeric" for one number as the answer, "written" for design, derivation or explanation graded on a rubric. Follow the kind they ask for. Otherwise prefer code for coding and numeric for quant, math, physics, chemistry and circuits.
+${KIND_GUIDE} Follow the kind they ask for. Otherwise use the one an interviewer in that subject would use.
 topic is two or three sentences telling the author exactly what to write. title is at most 8 words in sentence case.
 ${data({ request: p.request, guidance: p.guidance, level: intake.level, ...(intake.personal ? {} : { company: intake.company, role: intake.role }), source: p.source })}`;
 
 const planPrompt = (intake) => `Plan a practice set of exactly ${intake.count} problems for the interview described below.
 Use every listed subject at least once and no other subject. Match the level, the company's domain and what the rounds test. Order from easier to harder, and vary the topics.
-kind is "code" for a function the candidate writes and runs against tests, "numeric" for one number as the answer, "written" for design, derivation or explanation that a rubric grades. Prefer code for coding subjects and numeric for quant, math, physics, chemistry and circuits. Use written for system design and wherever an interviewer would want the reasoning or a diagram. The candidate can write, typeset equations and draw.
+${KIND_GUIDE} Prefer code for coding and machine learning, sql for SQL, ui for frontend, numeric for quant, math, statistics, physics, chemistry, mechanics, circuits and finance, and written for system design, UI/UX, product, case, biology and behavioral, unless the rounds suggest otherwise. Behavioral problems ask for a real story and are graded on situation, actions, result and reflection.
 quote must be 3 to 15 consecutive words copied exactly from "posting" or "rounds" that the problem trains. Prefer a different quote for each problem. Use an empty string only when nothing fits.
 topic is one sentence telling the author what to write. title is at most 8 words in sentence case.
 ${data(intake)}`;
@@ -70,11 +80,14 @@ State constraints and the expected time complexity in the statement. Do not repe
   numeric: `kind: numeric. The answer is one finite real number in the stated unit (empty string for a pure number). Say in the statement which unit, and how many significant figures are needed. tolerance is the relative error to accept, between 0.0001 and 0.05.
 solver_python defines solve() with no parameters and returns the number, computed from the givens in the statement without using your stated answer. Standard library only. It will be executed and must match answer.`,
   written: `kind: written. Ask for a design, derivation or explanation that can be answered in 10 to 20 minutes of writing or drawing. The candidate has a drawing canvas, so ask for a diagram where an interviewer would. No number or code is checked, so the rubric decides.`,
+  ui: `kind: ui. The candidate builds one interface or component as a single HTML file with inline <style> and <script>, no libraries, no network, no storage, no alert. Say in the statement exactly which labels, roles, ids or data-testid values the checks rely on, plus the states, keyboard behavior and accessibility you expect.
+starter_html is a small valid starting file. reference_html is a complete solution. checks holds 5 to 10 tests. Each js is the body of an async function that runs inside the page with $(selector), $$(selector), assert(condition, message), await click(selectorOrNode), await type(selectorOrNode, text), await press(selectorOrNode, key), await wait(ms). Test behavior a user can see, never implementation details or exact styles. Every check must pass on reference_html and fail on starter_html, and must not depend on the ones before it beyond what it sets up itself.`,
+  sql: `kind: sql. The candidate writes one SQLite SELECT statement. setup_sql holds the CREATE TABLE statements. datasets holds 5 to 8 strings of INSERT statements for those tables, starting with a small readable one, then empty tables (an empty string), ties, NULLs, duplicates and larger ones up to 60 rows. Describe every table and column, the exact output columns in order, and the order of rows in the statement. ordered is true only when the statement fixes the row order completely. reference_sql and second_sql are two queries written in different ways, each a single SELECT or WITH statement that must return the same rows on every dataset. Printable ASCII only.`,
 };
 const figure = `figure_svg: an inline SVG drawing when one genuinely helps, such as a circuit, free-body diagram or apparatus, otherwise an empty string. Include xmlns, a viewBox about 400 wide, black strokes on white, text of at least 14px, no scripts, no external references.`;
 const problemPrompt = (kind, intake, brief, problem) => `Write one original interview problem.
 ${rules[kind]}
-${kind === 'code' ? '' : figure}
+${kind === 'numeric' || kind === 'written' ? figure : ''}
 statement is Markdown with $...$ or $$...$$ for math. It must be complete and unambiguous on its own. Do not reveal the method. Do not use headings. Never write a dollar sign for money, write USD.
 hints: exactly 3, from gentle to nearly the method. rubric: 3 to 5 short points an interviewer would check in the reasoning or code, each one sentence. solution_text explains the full solution in Markdown.
 ${brief.request ? 'Write the problem the request asks for. When there is source material, build on its idea and change the setting, the numbers and the wording, so the result is original and complete without the source.' : 'Write an original problem shaped by this company and role, not a copy of a published one.'}
@@ -129,10 +142,43 @@ async function verifyCode(d) {
   }
   cases.forEach((c, i) => {
     const value = solution.results[i].actual;
+    if (!plainText(value)) throw new Rejected(`the result ${show(value)} uses characters outside printable ASCII`);
     if (!same(value, brute.results[i].actual, d.compare)) throw new Rejected(`on ${show(c.args)} solution_python returned ${show(value)} and brute_python returned ${show(brute.results[i].actual)}`);
     if ('expected' in c && !same(value, c.expected, d.compare)) throw new Rejected(`the example ${show(c.args)} says ${show(c.expected)} but both solutions returned ${show(value)}`);
   });
   return { signature, compare: d.compare, exampleCount: examples.length, cases: cases.map((c, i) => ({ args: c.args, expected: solution.results[i].actual, ...(c.explanation && { explanation: c.explanation }) })), solutionCode: d.solution_python };
+}
+
+const QUERY = { name: 'query', params: [{ name: 'data', type: 'string' }], returns: 'string[][]' };
+async function verifySql(d) {
+  const cases = [...new Set(d.datasets)].slice(0, 12).map((x) => ({ args: [`${d.setup_sql.trim()}\n${x.trim()}`.trim()] }));
+  if (cases.length < 4) throw new Rejected('fewer than 4 different datasets were given');
+  for (const { args } of cases) if (!plainText(args) || args[0].length > 20000) throw new Rejected('datasets must be printable ASCII and under 20,000 characters');
+  const compare = d.ordered ? 'exact' : 'unordered';
+  const [a, b] = await Promise.all([d.reference_sql, d.second_sql].map((code) => trial({ language: 'sql', code, signature: QUERY, cases })));
+  for (const [name, r] of [['reference_sql', a], ['second_sql', b]]) {
+    const i = r.results.findIndex((x) => x.status !== 'pass');
+    if (i >= 0) throw new Rejected(`${name} failed on dataset ${i + 1}: ${r.results[i].error}`);
+  }
+  cases.forEach((_, i) => {
+    if (!same(a.results[i].actual, b.results[i].actual, compare)) throw new Rejected(`on dataset ${i + 1} reference_sql returned ${show(a.results[i].actual)} and second_sql returned ${show(b.results[i].actual)}`);
+  });
+  if (!a.results[0].actual.length) throw new Rejected('the first dataset must give at least one row');
+  return { signature: QUERY, compare, exampleCount: 1, cases: cases.map((c, i) => ({ args: c.args, expected: a.results[i].actual })), solutionCode: d.reference_sql };
+}
+
+const UI_LIMIT = 60000;
+function verifyUi(d) {
+  if (d.checks.length < 3) throw new Rejected('fewer than 3 checks were given');
+  for (const c of d.checks) {
+    try {
+      new Function(`return async () => {\n${c.js}\n}`);
+    } catch (e) {
+      throw new Rejected(`the check "${c.name}" does not parse: ${e.message}`);
+    }
+  }
+  if (!d.reference_html.trim() || d.reference_html.length > UI_LIMIT || d.starter_html.length > UI_LIMIT) throw new Rejected('reference_html must be a full page under 60,000 characters');
+  return { starter: d.starter_html, solutionCode: d.reference_html, checks: d.checks.slice(0, 12) };
 }
 
 async function verifyNumeric(d) {
@@ -152,6 +198,8 @@ async function verify(kind, d) {
   const base = { statement: d.statement, hints: d.hints.slice(0, 3), rubric: d.rubric.slice(0, 6), solutionText: d.solution_text, figure: svg(d.figure_svg) };
   if (kind === 'code') return { ...base, ...(await verifyCode(d)) };
   if (kind === 'numeric') return { ...base, ...(await verifyNumeric(d)) };
+  if (kind === 'sql') return { ...base, ...(await verifySql(d)) };
+  if (kind === 'ui') return { ...base, ...verifyUi(d) };
   return base;
 }
 
@@ -250,7 +298,7 @@ export async function tracked(setId, fn) {
   } catch (e) {
     if (!job.controller.signal.aborted) console.error(e);
   } finally {
-    if (--job.count === 0) jobs.delete(setId);
+    if (--job.count === 0 && jobs.get(setId) === job) jobs.delete(setId);
   }
 }
 
@@ -314,7 +362,10 @@ export async function retryProblem(setId, pid) {
   tracked(setId, (job) => runQueued(setId, [pid], job));
 }
 
-export const stopSet = (setId) => jobs.get(setId)?.controller.abort();
+export function stopSet(setId) {
+  jobs.get(setId)?.controller.abort();
+  jobs.delete(setId);
+}
 
 /** Work cut off by a closed server becomes a retryable failure. Call only once this process owns the port. */
 export async function recoverInterrupted() {
@@ -325,7 +376,7 @@ export async function recoverInterrupted() {
       for (const p of s.problems) if (p.status === 'queued' || p.status === 'writing') Object.assign(p, { status: 'failed', step: null, error: message });
       for (const p of s.problems) {
         if (p.chatBusy) Object.assign(p, { chatBusy: false, chatError: message });
-        if (p.visual?.status === 'working') Object.assign(p.visual, { status: 'failed', step: null, error: message });
+        if (p.visual?.status === 'working') Object.assign(p.visual, { status: p.visual.html ? 'ready' : 'failed', step: null, error: message });
       }
     });
   }

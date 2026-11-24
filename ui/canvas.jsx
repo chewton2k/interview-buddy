@@ -4,7 +4,6 @@ import { Excalidraw, exportToBlob } from '@excalidraw/excalidraw';
 import { createRoot } from 'react-dom/client';
 import { outline } from './outline.js';
 
-window.EXCALIDRAW_ASSET_PATH = '/';
 const sheet = document.createElement('link');
 Object.assign(sheet, { rel: 'stylesheet', href: '/canvas.css' });
 const styled = new Promise((done) => (sheet.onload = sheet.onerror = done));
