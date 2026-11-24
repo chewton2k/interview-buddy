@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { track } from './providers.js';
 import { badSignature, build, fits, same } from './harness.js';
 
 const exec = promisify(execFile);
@@ -28,10 +29,10 @@ let toolsPromise;
 // Resolves interpreters once; version managers keep them under the home folder, which the profile otherwise hides.
 export function tools() {
   return (toolsPromise ??= (async () => {
-    const python = await exec('python3', ['-c', 'import sys,platform,os;print(os.path.realpath(sys.executable));print(sys.base_prefix);print(platform.python_version())'])
+    const python = await exec('python3', ['-I', '-c', 'import sys,platform,os;print(os.path.realpath(sys.executable));print(sys.base_prefix);print(platform.python_version())'], { cwd: os.tmpdir() })
       .then((r) => r.stdout.trim().split('\n'))
       .catch(() => null);
-    const clang = await exec('clang++', ['--version'])
+    const clang = await exec('clang++', ['--version'], { cwd: os.tmpdir() })
       .then((r) => r.stdout.match(/version (\S+)/)?.[1])
       .catch(() => null);
     const node = await fs.realpath(process.execPath);
@@ -48,10 +49,11 @@ function launch(dir, command, { fork = false, timeout, reads, sandbox }) {
   const cpuSeconds = Math.ceil(timeout / 1000) + 1;
   const child = spawn(sandbox, [...params, '-p', PROFILE(reads, fork), '/bin/sh', '-c', `ulimit -f 131072; ulimit -t ${cpuSeconds}; exec "$@"`, 'sh', ...command], {
     cwd: dir,
-    env: { PATH: '/usr/bin:/bin', HOME: dir, TMPDIR: dir, LANG: 'en_US.UTF-8', PYTHONIOENCODING: 'utf-8', SOURCE_DATE_EPOCH: '0' },
+    env: { PATH: '/usr/bin:/bin', HOME: dir, TMPDIR: dir, LANG: 'en_US.UTF-8', PYTHONIOENCODING: 'utf-8', NODE_V8_COVERAGE: '' },
     stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
     detached: true,
   });
+  track(child);
   return new Promise((resolve) => {
     const out = ['', '', '', ''];
     let reason = null;
@@ -98,45 +100,51 @@ async function slot(fn) {
 
 const WHY = { timeout: 'Took longer than 10 seconds', memory: 'Used more than 1 GB of memory', output: 'Printed more than 1 MB' };
 
-/** cases: [{args, expected?}]. A case without `expected` passes when it returns a value of the declared type. */
+/** With `trace`, Python runs also return the line by line values of the last case. cases: [{args, expected?}]. A case without `expected` passes when it returns a value of the declared type. */
 export function runCode(options) {
   return slot(() => run(options));
 }
 
-async function run({ language, code, signature, cases, compare = 'exact', timeout = 10000, sandbox = '/usr/bin/sandbox-exec' }) {
+async function run({ language, code, signature, cases, compare = 'exact', timeout = 10000, trace = false, sandbox = '/usr/bin/sandbox-exec' }) {
   const fail = (compileError) => ({ results: cases.map(() => ({ status: 'error', error: compileError })), stdout: '', compileError });
-  if (process.platform !== 'darwin') return fail('Code problems run on macOS only for now.');
+  const unavailable = (why) => ({ ...fail(why), unavailable: true });
+  if (process.platform !== 'darwin') return unavailable('Code runs on macOS only for now.');
   const bad = badSignature(signature);
   if (bad) return fail(bad);
   const misfit = cases.findIndex((c) => !Array.isArray(c.args) || c.args.length !== signature.params.length || !c.args.every((a, i) => fits(a, signature.params[i].type)));
   if (misfit >= 0) return fail(`Test ${misfit + 1} does not match the function signature`);
   const tool = (await tools())[language];
-  if (!tool) return fail(language === 'python' ? 'python3 was not found. Install Python 3 and restart.' : 'clang++ was not found. Run xcode-select --install and restart.');
+  if (!tool) return unavailable(language === 'python' ? 'python3 was not found. Install Python 3 and restart.' : 'clang++ was not found. Run xcode-select --install and restart.');
 
   const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), PREFIX)));
   try {
-    const plan = build(language, code, signature, cases.map((c) => c.args));
+    const plan = build(language, code, signature, cases.map((c) => c.args), trace);
     await Promise.all(Object.entries(plan.files).map(([f, text]) => fs.writeFile(path.join(dir, f), text)));
     const reads = tool.prefix ? [tool.prefix, path.dirname(tool.bin)] : [];
     if (plan.compile) {
       const c = await launch(dir, [tool.bin, ...plan.compile.slice(1)], { fork: true, timeout: 30000, reads, sandbox });
-      if (c.code !== 0) return fail(c.spawnError ?? (c.reason && `Compiling stopped: ${c.reason}`) ?? (c.stderr.trim() || 'Compiling failed'));
+      if (c.spawnError || /^sandbox-exec:/.test(c.stderr)) return unavailable(`The sandbox could not start: ${c.spawnError ?? c.stderr.trim()}`);
+      if (c.code !== 0) return fail((c.reason && `Compiling stopped: ${c.reason}`) ?? (c.stderr.trim() || 'Compiling failed'));
     }
     const command = plan.compile ? [path.join(dir, 'main')] : [tool.bin, ...plan.run.slice(1)];
     const r = await launch(dir, command, { timeout, reads, sandbox });
     const lines = r.channel.split('\n').filter(Boolean);
     const parsed = [];
+    let steps;
+    let started = false;
     for (const line of lines) {
       try {
-        parsed.push(JSON.parse(line));
+        const o = JSON.parse(line);
+        if (o.start) started = true;
+        else if (o.trace) steps = o.trace;
+        else parsed.push(o);
       } catch {
         break;
       }
     }
-    if (r.spawnError) return fail(`The sandbox could not start: ${r.spawnError}`);
+    if (!started && !r.reason && !r.signal && r.code <= 128) return unavailable(`The sandbox could not start: ${r.spawnError ?? (r.stderr.trim() || `exit code ${r.code}`)}`);
     if (parsed[0]?.load) return { ...fail(parsed[0].load), stdout: r.stdout };
-    if (!parsed.length && r.code !== 0 && !r.reason && !r.signal) return { ...fail(r.stderr.trim() || `Exited with code ${r.code}`), stdout: r.stdout };
-    const stopped = WHY[r.reason] ?? (r.signal === 'SIGXCPU' ? WHY.timeout : r.signal || r.code > 128 ? `Crashed (${r.signal ?? `signal ${r.code - 128}`})` : 'Stopped before this test finished');
+    const stopped = WHY[r.reason] ?? (r.signal === 'SIGXCPU' ? WHY.timeout : r.signal || r.code > 128 ? `Crashed (${r.signal ?? `signal ${r.code - 128}`})` : r.stderr.trim() || `Exited with code ${r.code} before this test finished`);
     const results = cases.map((c, i) => {
       const p = parsed[i];
       if (!p) return i === parsed.length ? { status: stopped === WHY.timeout ? 'timeout' : 'error', error: stopped } : { status: 'skipped', error: 'Not run' };
@@ -144,10 +152,18 @@ async function run({ language, code, signature, cases, compare = 'exact', timeou
       if (!fits(p.value, signature.returns)) return { status: 'fail', actual: p.value, ms: p.ms, error: `Expected a value of type ${signature.returns}` };
       return { status: 'expected' in c && !same(p.value, c.expected, compare) ? 'fail' : 'pass', actual: p.value, ms: p.ms };
     });
-    return { results, stdout: r.stdout, compileError: null };
+    return { results, stdout: r.stdout, compileError: null, trace: steps };
   } finally {
-    await fs.rm(dir, { recursive: true, force: true });
+    await discard(dir);
   }
+}
+
+// Code under test can leave folders without permissions behind.
+async function discard(dir) {
+  await fs.rm(dir, { recursive: true, force: true }).catch(async () => {
+    await exec('/bin/chmod', ['-R', 'u+rwx', dir]).catch(() => {});
+    await fs.rm(dir, { recursive: true, force: true }).catch((e) => console.error(e.message));
+  });
 }
 
 export async function sweep() {
@@ -156,7 +172,7 @@ export async function sweep() {
   for (const n of names.filter((x) => x.startsWith(PREFIX))) {
     const p = path.join(os.tmpdir(), n);
     const s = await fs.stat(p).catch(() => null);
-    if (s && s.mtimeMs < old) await fs.rm(p, { recursive: true, force: true });
+    if (s && s.mtimeMs < old) await discard(p);
   }
 }
 

@@ -49,7 +49,7 @@ svg.icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentCol
 .row { display: flex; align-items: center; gap: 8px; }
 .between { justify-content: space-between; }
 .wrap { flex-wrap: wrap; }
-.stack { display: grid; gap: 16px; align-content: start; }
+.stack { display: grid; gap: 16px; align-content: start; grid-template-columns: minmax(0, 1fr); }
 .tight { gap: 8px; }
 
 .mark { background: var(--mark-soft); color: inherit; padding: 1px 2px; margin: 0 -2px; border-radius: 3px 8px 4px 10px / 8px 4px 10px 4px; box-decoration-break: clone; -webkit-box-decoration-break: clone; transition: background-color 140ms var(--ease), color 140ms var(--ease); }
@@ -114,6 +114,22 @@ a.item:hover, .over .item { background: var(--well); }
 .count { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .bench { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); height: calc(100vh - 56px); }
+.bench.analysis { grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); }
+.bench.asking { grid-template-columns: minmax(0, 4fr) minmax(0, 5fr) 340px; }
+.bench.asking.analysis { grid-template-columns: minmax(0, 5fr) minmax(0, 4fr) 340px; }
+.brief .case[aria-pressed="true"] { background: var(--raised); border-color: transparent; }
+.analysis iframe { width: 100%; height: max(480px, calc(100vh - 320px)); border: 0; background: var(--card); color-scheme: light dark; }
+.analysis iframe:fullscreen { padding: 24px 32px; }
+.chat { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 12px; padding: 16px; background: var(--card); border-left: 1px solid var(--line); min-height: 0; min-width: 0; }
+.talk { overflow: auto; display: flex; flex-direction: column; gap: 16px; overflow-wrap: anywhere; }
+.said { display: grid; gap: 8px; justify-items: start; grid-template-columns: minmax(0, 1fr); font-size: 14px; line-height: 20px; }
+.said.user > p { justify-self: end; background: var(--raised); border-radius: 12px; padding: 8px 12px; white-space: pre-wrap; max-width: 88%; }
+.said .prose { width: 100%; }
+.ask { display: grid; gap: 8px; }
+.ask .input { font-size: 14px; line-height: 20px; }
+.ask .btn { justify-self: end; }
+.add .input.auto { width: auto; min-height: 36px; padding: 4px 32px 4px 12px; font-size: 14px; }
+.add { gap: 12px; padding: 20px; }
 .brief { overflow: auto; padding: 24px 32px 48px; background: var(--card); border-right: 1px solid var(--line); }
 .work { display: grid; grid-template-rows: auto minmax(200px, 1fr) minmax(180px, 42%); min-height: 0; min-width: 0; }
 .work.plain { display: block; overflow: auto; padding: 32px; }
@@ -173,12 +189,18 @@ a.back:hover { color: var(--text); }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+@media (min-width: 901px) and (max-width: 1199px) {
+  .bench.asking, .bench.asking.analysis { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .chat { position: fixed; top: 56px; right: 0; bottom: 0; width: 340px; box-shadow: var(--shadow); z-index: 1; }
+}
 @media (max-width: 900px) {
   .top { padding: 0 16px; gap: 12px; }
   .top nav { gap: 0; }
   .top nav a { padding: 0 8px; }
   .page { padding: 24px 16px; }
-  .desk, .bench, .pair { grid-template-columns: minmax(0, 1fr); }
+  .desk, .bench, .bench.asking, .bench.analysis, .bench.asking.analysis, .pair { grid-template-columns: minmax(0, 1fr); }
+  .chat { border-left: 0; border-top: 1px solid var(--line); }
+  .talk { max-height: 480px; }
   .pair.keep { grid-template-columns: 1fr 1fr; }
   .desk { gap: 24px; }
   .setrow .clip { display: block; }

@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 export async function api(method, path, body) {
   let res;
   try {
-    res = await fetch(`/api${path}`, { method, ...(method !== 'GET' && method !== 'DELETE' && { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) }) });
+    res = await fetch(`/api${path}`, { method, ...(method !== 'GET' && method !== 'DELETE' && { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}), keepalive: JSON.stringify(body ?? {}).length < 20000 }) });
   } catch {
     throw new Error('Interview Buddy is not running. Start it again in the terminal.');
   }
@@ -36,12 +36,15 @@ export function useAction(fn) {
 export function useLoad(path, again = () => false) {
   const [value, setValue] = useState(null);
   const [error, setError] = useState('');
+  const [tick, setTick] = useState(0);
   const load = useCallback(
     () =>
-      api('GET', path).then(
-        (v) => (setValue(v), setError('')),
-        (e) => setError(e.message),
-      ),
+      api('GET', path)
+        .then(
+          (v) => (setValue(v), setError('')),
+          (e) => setError(e.message),
+        )
+        .finally(() => setTick((t) => t + 1)),
     [path],
   );
   useEffect(() => {
@@ -52,12 +55,12 @@ export function useLoad(path, again = () => false) {
     if (!value || !again(value)) return;
     const t = setTimeout(load, 1500);
     return () => clearTimeout(t);
-  }, [value, error]);
+  }, [tick]);
   return { value, error, load };
 }
-export const useSet = (id) => useLoad(`/sets/${id}`, ({ set }) => set.status === 'planning' || set.problems.some((p) => ['queued', 'writing'].includes(p.status)));
+export const useSet = (id) => useLoad(`/sets/${id}`, ({ set }) => set.status === 'planning' || set.problems.some((p) => ['queued', 'writing'].includes(p.status) || p.chatBusy || p.visual?.status === 'working'));
 
-const PATHS = { check: 'M20 6 9 17l-5-5', x: 'M18 6 6 18M6 6l12 12', plus: 'M5 12h14M12 5v14', play: 'M6 4l14 8-14 8z', trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13', load: 'M12 3a9 9 0 1 0 9 9', back: 'M15 18l-6-6 6-6', alert: 'M12 8v5M12 16.5v.01M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18' };
+const PATHS = { check: 'M20 6 9 17l-5-5', x: 'M18 6 6 18M6 6l12 12', plus: 'M5 12h14M12 5v14', play: 'M6 4l14 8-14 8z', trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13', load: 'M12 3a9 9 0 1 0 9 9', back: 'M15 18l-6-6 6-6', chat: 'M5 5h14v11h-8l-4 4v-4H5z', alert: 'M12 8v5M12 16.5v.01M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18' };
 export const Icon = ({ name }) => (
   <svg class={`icon ${name === 'load' ? 'spin' : ''}`} viewBox="0 0 24 24" aria-hidden="true">
     <path d={PATHS[name]} />
@@ -78,6 +81,11 @@ const marked = new Marked({
       renderer: (t) => katex.renderToString(t.text, { displayMode: t.display, throwOnError: false }),
     },
   ],
+});
+// KaTeX needs inline sizes. Anything that could move content over the rest of the page is dropped.
+const SAFE_STYLE = /^\s*(height|width|min-width|max-width|margin(-\w+)?|padding(-\w+)?|top|left|vertical-align|border(-\w+)*|color|font-size)\s*:[^;()]*$/i;
+DOMPurify.addHook('uponSanitizeAttribute', (_, a) => {
+  if (a.attrName === 'style') a.attrValue = a.attrValue.split(';').filter((d) => SAFE_STYLE.test(d)).join(';');
 });
 const CLEAN = { FORBID_TAGS: ['a', 'img', 'style', 'form', 'input', 'button', 'textarea', 'select', 'video', 'audio'], FORBID_ATTR: ['id', 'name'] };
 const html = (text, inline) => ({ __html: DOMPurify.sanitize(inline ? marked.parseInline(text) : marked.parse(text), CLEAN) });

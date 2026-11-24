@@ -3,8 +3,21 @@ import { api, modelName, Problem, useAction, useLoad } from './lib.jsx';
 
 const START = { company: '', role: '', posting: '', rounds: '', subjects: [], level: 'New grad', count: 6 };
 
+const kept = () => {
+  try {
+    return { ...START, ...JSON.parse(sessionStorage.getItem('intake')) };
+  } catch {
+    return START;
+  }
+};
+const keep = (form) => {
+  try {
+    sessionStorage.setItem('intake', JSON.stringify(form));
+  } catch {}
+};
+
 export function Intake() {
-  const [form, setForm] = useState(START);
+  const [form, setForm] = useState(kept);
   const [other, setOther] = useState(null);
   const { value: options } = useLoad('/options');
   const { value: saved } = useLoad('/settings');
@@ -13,8 +26,10 @@ export function Intake() {
   const make = useAction(async () => {
     const extra = (other ?? '').split(',').map((s) => s.trim()).filter(Boolean);
     const { id } = await api('POST', '/sets', { ...form, subjects: [...form.subjects, ...extra] });
+    keep(START);
     location.hash = `#/sets/${id}`;
   });
+  useEffect(() => keep(form), [form]);
   useEffect(() => void (document.title = 'New set, Interview Buddy'), []);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const toggle = (s) => setForm({ ...form, subjects: form.subjects.includes(s) ? form.subjects.filter((x) => x !== s) : [...form.subjects, s] });

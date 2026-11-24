@@ -3,15 +3,18 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkNumber } from './answers.js';
-import { createSet, grade, LEVELS, retryProblem, retrySet, stopSet, SUBJECTS } from './generate.js';
+import { addProblem, checkRequest, createSet, grade, LEVELS, personalSet, retryProblem, retrySet, stopSet, SUBJECTS } from './generate.js';
 import { starter } from './harness.js';
+import { findLinks } from './link.js';
 import { ping, ProviderError, providerStatus } from './providers.js';
 import { LANGUAGES, runCode, selfTest, tools } from './sandbox.js';
 import { checkChoice, deleteSet, Invalid, listSets, NotFound, readSet, readSettings, saveSettings, updateProblem } from './store.js';
+import { analyze, chat, repair, visualOf } from './tutor.js';
 
 const DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.svg': 'image/svg+xml' };
-const CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2' };
+const CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+const FRAME_CSP = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
 const BODY_LIMIT = 1 << 20;
 
 class HttpError extends Error {
@@ -20,6 +23,26 @@ class HttpError extends Error {
     this.status = status;
   }
 }
+
+class Page {
+  constructor(content, csp) {
+    Object.assign(this, { content, csp });
+  }
+}
+
+/** The model-written analysis with its kit inlined. The policy gives it an opaque origin and no network. */
+async function framePage({ html, data }) {
+  const [css, kit] = await Promise.all(['stage.css', 'stage.js'].map((f) => fs.readFile(path.join(DIST, f), 'utf8')));
+  const json = JSON.stringify(data ?? {}).replace(/</g, '\\u003c');
+  return new Page(
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Analysis</title><style>${css}</style></head><body><script type="application/json" id="stage-data">${json}</script><script>${kit.replace(/<\/script/gi, '<\\/script')}</script><div id="stage">${html}</div></body></html>`,
+    FRAME_CSP,
+  );
+}
+const add = async (setId, body) => {
+  const { request, subject } = checkRequest(body);
+  return { setId, id: await addProblem(setId, { request, subject, links: findLinks(request) }) };
+};
 
 async function readBody(req) {
   if (!/^application\/json\b/.test(req.headers['content-type'] ?? '')) throw new HttpError(415, 'Send JSON');
@@ -78,13 +101,30 @@ const routes = [
     return { ok: true };
   }],
   ['GET', /^\/api\/sets$/, async () => ({
-    sets: (await listSets()).map((s) => ({ id: s.id, createdAt: s.createdAt, company: s.intake.company, role: s.intake.role, level: s.intake.level, status: s.status, total: s.problems.length, solved: s.problems.filter((p) => p.progress === 'solved').length, quote: s.problems.find((p) => p.quote)?.quote ?? '' })),
+    sets: (await listSets()).map((s) => ({ id: s.id, createdAt: s.createdAt, company: s.intake.company, role: s.intake.role, level: s.intake.level, status: s.status, busy: s.status === 'planning' || s.problems.some((p) => ['queued', 'writing'].includes(p.status)), total: s.problems.length, solved: s.problems.filter((p) => p.progress === 'solved').length, quote: s.problems.find((p) => p.quote)?.quote ?? '' })),
   })],
   ['POST', /^\/api\/sets$/, async (_, body) => ({ id: (await createSet(body)).id })],
   ['GET', /^\/api\/sets\/([^/]+)$/, async ([id]) => {
     const set = await readSet(id);
     for (const p of set.problems) if (p.body?.signature) p.starters = Object.fromEntries(LANGUAGES.map((l) => [l, starter(l, p.body.signature)]));
+    for (const p of set.problems) {
+      delete p.source;
+      if (p.visual) for (const k of ['html', 'data']) delete p.visual[k];
+    }
     return { set };
+  }],
+  ['POST', /^\/api\/problems$/, async (_, body) => {
+    checkRequest(body);
+    return add(await personalSet(), body);
+  }],
+  ['POST', /^\/api\/sets\/([^/]+)\/problems$/, ([id], body) => add(id, body)],
+  ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/chat$/, async ([id, pid], body) => (await chat(id, pid, body), {})],
+  ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/analyze$/, async ([id, pid], body) => (await analyze(id, pid, body), {})],
+  ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/analyze\/repair$/, async ([id, pid], body) => (await repair(id, pid, body), {})],
+  ['GET', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/visual$/, async ([id, pid]) => {
+    const visual = await visualOf(id, pid);
+    if (!visual) throw new NotFound();
+    return framePage(visual);
   }],
   ['DELETE', /^\/api\/sets\/([^/]+)$/, async ([id]) => {
     stopSet(id);
@@ -167,8 +207,13 @@ export function createServer() {
       if (!hosts.includes(req.headers.host)) throw new HttpError(403, 'Open Interview Buddy on localhost');
       // A foreign page cannot forge Origin, so this keeps other sites from running code or spending the subscription.
       if (req.method !== 'GET' && req.method !== 'HEAD' && !hosts.map((h) => `http://${h}`).includes(req.headers.origin)) throw new HttpError(403, 'Requests must come from Interview Buddy');
+      if (!['same-origin', 'none', undefined].includes(req.headers['sec-fetch-site']) && req.url.startsWith('/api/')) throw new HttpError(403, 'Requests must come from Interview Buddy');
       const url = new URL(req.url, `http://${req.headers.host}`);
-      if (url.pathname.startsWith('/api/')) return send(200, 'application/json', JSON.stringify(await api(req, res, url)));
+      if (url.pathname.startsWith('/api/')) {
+        const value = await api(req, res, url);
+        if (value instanceof Page) return void res.writeHead(200, { ...headers, 'content-security-policy': value.csp, 'content-type': TYPES['.html'] }).end(value.content);
+        return send(200, 'application/json', JSON.stringify(value));
+      }
       if (req.method !== 'GET') throw new HttpError(405, 'There is nothing at this address');
       const { content, type } = await asset(url);
       send(200, type, content);

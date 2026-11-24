@@ -31,7 +31,7 @@ async function ready(id) {
 }
 
 test('settings choose the account, model and effort for each job', async () => {
-  const settings = { write: { provider: 'codex', model: 'gpt-x', effort: 'high' }, grade: { provider: 'claude', model: 'haiku', effort: '' } };
+  const settings = { write: { provider: 'codex', model: 'gpt-x', effort: 'high' }, grade: { provider: 'claude', model: 'haiku', effort: '' }, tutor: { provider: 'claude', model: 'opus', effort: 'low' } };
   assert.equal((await call('PUT', '/api/settings', settings)).status, 200);
   assert.deepEqual((await call('GET', '/api/settings')).json.settings, settings);
   replies([{ match: 'Plan a', reply: { problems: [brief()] } }, { match: 'Write one', reply: code() }, { match: 'Grade this', reply: { summary: 's', points: [{ mark: 'met', note: '' }, { mark: 'met', note: '' }] } }]);
@@ -49,6 +49,8 @@ test('settings choose the account, model and effort for each job', async () => {
   await call('POST', `${at}/feedback`, { answer: 'x' });
   c = calls();
   assert.ok(c[0].name === 'codex' && c[0].args.join(' ').includes('--model gpt-y'));
+  const { tutor, ...older } = settings;
+  assert.deepEqual((await call('PUT', '/api/settings', older)).json.settings.tutor, older.grade);
   assert.equal((await call('PUT', '/api/settings', { ...settings, write: { provider: 'codex', model: '-x', effort: '' } })).status, 400);
 });
 
@@ -143,6 +145,7 @@ test('requests from other sites and malformed requests are refused', async () =>
     [403, 'POST', '/api/sets', { body, headers: { ...json, origin: 'https://evil.example' } }],
     [403, 'POST', '/api/sets', { body, headers: json }],
     [403, 'DELETE', '/api/sets/x', {}],
+    [403, 'GET', '/api/status', { headers: { 'sec-fetch-site': 'cross-site' } }],
     [415, 'POST', '/api/sets', { body, headers: { origin, 'content-type': 'text/plain' } }],
     [400, 'POST', '/api/sets', { body: '{', headers: { ...json, origin } }],
     [400, 'POST', '/api/sets', { body: 'null', headers: { ...json, origin } }],
@@ -154,6 +157,7 @@ test('requests from other sites and malformed requests are refused', async () =>
     [404, 'GET', '/..%2fpackage.json', {}],
     [404, 'GET', '/%00.js', {}],
     [400, 'GET', '/%zz', {}],
+    [403, 'POST', '/api/problems', { body: JSON.stringify({ request: 'x' }), headers: { ...json, origin: 'null' } }],
     [405, 'POST', '/', { body, headers: { ...json, origin } }],
   ];
   for (const [status, method, path, o] of expected) {
@@ -171,7 +175,7 @@ test('the page is served with a strict policy', async () => {
   assert.equal((await raw('GET', '/app.js')).headers['content-type'], 'text/javascript; charset=utf-8');
 });
 
-test('the command starts, answers and points at a running copy', async () => {
+test('the command starts, answers and points at a running copy', { timeout: 30000 }, async () => {
   const run = (...args) => {
     const p = spawn(process.execPath, ['bin/interview-buddy.js', '--no-open', ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
     p.out = '';

@@ -1,0 +1,51 @@
+:root {
+  color-scheme: light;
+  --card: #ffffff; --raised: #f4f4f5; --text: #171717; --second: #525252; --muted: #696969; --line: rgb(23 23 23 / 0.12);
+  --mark: #ffe45c; --mark-soft: #fff3b0; --blue: #1d4ed8; --green: #15803d; --red: #b91c1c; --orange: #b45309; --teal: #0f766e; --ink: #171717; --on-ink: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --card: #19191b; --raised: #232325; --text: #ededed; --second: #a1a1a6; --muted: #8e8e94; --line: rgb(237 237 237 / 0.14);
+    --mark: #f2d64b; --mark-soft: #574d18; --blue: #8ab4ff; --green: #4cc38a; --red: #ff7b7f; --orange: #f0b065; --teal: #5cc8bd; --ink: #ededed; --on-ink: #171717;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 4px 0 32px; background: var(--card); color: var(--text); font: 400 16px/24px "Atkinson Hyperlegible Next Variable", system-ui, sans-serif; -webkit-font-smoothing: antialiased; overflow-wrap: anywhere; }
+#stage { display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr); }
+h1, h2, h3, p, ul, ol { margin: 0; }
+h2 { font-size: 20px; line-height: 28px; font-weight: 500; }
+h3 { font-size: 16px; line-height: 24px; font-weight: 500; }
+svg { display: block; max-width: 100%; height: auto; }
+svg text { font-family: inherit; }
+code, pre { font-family: "Atkinson Hyperlegible Mono Variable", ui-monospace, monospace; font-size: 14px; }
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+input[type="range"] { accent-color: var(--ink); width: 100%; min-width: 0; margin: 0; }
+mark { background: var(--mark-soft); color: inherit; padding: 1px 2px; border-radius: 3px 8px 4px 10px / 8px 4px 10px 4px; }
+.stage-caption { min-height: 48px; }
+.stage-player { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.stage-button { font: 500 14px/20px inherit; font-family: inherit; height: 36px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+.stage-button.primary { background: var(--ink); border-color: var(--ink); color: var(--on-ink); min-width: 68px; }
+.stage-button:disabled { opacity: 0.5; cursor: default; }
+.stage-count { font-size: 14px; color: var(--second); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.stage-slider { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; font-size: 14px; line-height: 20px; }
+.stage-slider input { grid-column: 1 / -1; }
+.stage-value { font-variant-numeric: tabular-nums; font-weight: 600; }
+.stage-keys { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 14px; line-height: 20px; color: var(--second); padding-top: 8px; }
+.stage-key { display: inline-flex; align-items: center; gap: 8px; }
+.stage-key i { width: 12px; height: 4px; border-radius: 2px; }
+.stage-cells { display: flex; flex-wrap: wrap; gap: 4px; }
+.stage-cell { display: grid; justify-items: center; gap: 2px; min-width: 44px; }
+.stage-cell b { display: grid; place-items: center; min-width: 44px; height: 44px; padding: 0 8px; border-radius: 8px; background: var(--raised); font-weight: 500; font-variant-numeric: tabular-nums; transition: background-color 180ms ease-out, color 180ms ease-out; width: 100%; }
+.stage-cell small { font-size: 12px; line-height: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.stage-cell em { font-size: 12px; line-height: 16px; font-style: normal; font-weight: 600; min-height: 16px; }
+.stage-cell.on b { background: var(--mark); color: #171717; }
+.stage-cell.dim { opacity: 0.45; }
+.stage-code { list-style: none; counter-reset: line; padding: 8px 0; background: var(--raised); border-radius: 8px; overflow: auto; max-height: 300px; }
+.stage-code li { counter-increment: line; display: flex; line-height: 22px; transition: background-color 140ms ease-out; }
+.stage-code li::before { content: counter(line); width: 40px; padding-right: 12px; text-align: right; color: var(--muted); flex: none; font-size: 12px; font-variant-numeric: tabular-nums; }
+.stage-code code { white-space: pre-wrap; padding-right: 12px; }
+.stage-code li.on { background: var(--mark); color: #171717; }
+.stage-code li.on::before { color: #171717; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+@media (max-width: 480px) { .stage-player { flex-wrap: wrap; } .stage-player input { order: 5; flex-basis: 100%; } }

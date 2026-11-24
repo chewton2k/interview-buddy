@@ -41,6 +41,7 @@ export function Editor({ language, value, onChange, onRun }) {
         ],
       }),
     });
+    document.fonts.ready.then(() => view.requestMeasure());
     return () => view.destroy();
   }, []);
   return <div class="editor" ref={host} />;

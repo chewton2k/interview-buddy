@@ -34,7 +34,8 @@ export function same(a, b, compare = 'exact') {
 const KEYWORDS = new Set(
   ('and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield ' +
     'arguments case catch const debugger default delete do enum eval export extends function implements instanceof interface let new null package private protected public static super switch this throw typeof undefined var void ' +
-    'auto bool char double explicit extern float friend goto inline int long mutable namespace operator register short signed sizeof std struct template typedef typename union unsigned using virtual volatile main true false').split(' '),
+    'auto bool char double explicit extern float friend goto inline int long mutable namespace operator register short signed sizeof std struct template typedef typename union unsigned using virtual volatile main true false ' +
+    'alignas alignof and_eq asm bitand bitor char8_t char16_t char32_t compl concept consteval constexpr constinit const_cast co_await co_return co_yield decltype dynamic_cast mutable noexcept not_eq nullptr or_eq reinterpret_cast requires static_assert static_cast thread_local typeid wchar_t xor xor_eq unix linux').split(' '),
 );
 
 export function badSignature({ name, params, returns } = {}) {
@@ -76,7 +77,7 @@ export function starter(language, { name, params, returns }) {
     return `/**\n${doc}\n */\nfunction ${name}(${params.map((p) => p.name).join(', ')}) {\n\n}\n`;
   }
   const args = params.map((p) => `${cppType(p.type)}${p.type.endsWith(']') || p.type === 'string' ? '& ' : ' '}${p.name}`).join(', ');
-  return `using namespace std;\n\n${cppType(returns)} ${name}(${args}) {\n\n}\n`;
+  return `using namespace std;\n\n${cppType(returns)} ${name}(${args}) {\n\n    return {};\n}\n`;
 }
 
 const PY_MAIN = `import json, os, sys, time
@@ -84,11 +85,32 @@ _out = os.fdopen(3, "w")
 _spec = json.load(open("spec.json"))
 def _emit(o):
     _out.write(json.dumps(o, allow_nan=False) + "\\n"); _out.flush()
+_emit({"start": 1})
 try:
     import solution
     _fn = getattr(solution, _spec["name"])
 except BaseException as e:
     _emit({"load": type(e).__name__ + ": " + str(e)}); sys.exit(0)
+_steps = []
+def _snap(v, depth=0):
+    if isinstance(v, bool) or v is None or isinstance(v, int): return v
+    if isinstance(v, float): return v if v == v and abs(v) != float("inf") else repr(v)
+    if isinstance(v, str): return v[:120]
+    if depth < 3 and isinstance(v, (list, tuple)): return [_snap(x, depth + 1) for x in v[:40]]
+    if depth < 3 and isinstance(v, dict): return {str(k)[:60]: _snap(x, depth + 1) for k, x in list(v.items())[:40]}
+    if depth < 3 and isinstance(v, (set, frozenset)): return {"set": [_snap(x, depth + 1) for x in list(v)[:40]]}
+    if type(v).__name__ == "deque": return {"deque": [_snap(x, depth + 1) for x in list(v)[:40]]}
+    try: return repr(v)[:120]
+    except BaseException: return type(v).__name__
+def _tracer(frame, event, arg):
+    if not frame.f_code.co_filename.endswith("solution.py"): return None
+    if len(_steps) >= 400:
+        sys.settrace(None); return None
+    if event in ("line", "return", "exception"):
+        o = {"event": event, "line": frame.f_lineno, "function": frame.f_code.co_name, "vars": {k: _snap(v) for k, v in list(frame.f_locals.items())[:20] if not callable(v) and not k.startswith((".", "_"))}}
+        if event == "return": o["value"] = _snap(arg)
+        _steps.append(o)
+    return _tracer
 def _plain(v):
     if isinstance(v, (list, tuple)): return [_plain(x) for x in v]
     if v is None or isinstance(v, (bool, int, float, str)): return v
@@ -96,7 +118,10 @@ def _plain(v):
 for _args in _spec["args"]:
     _t = time.perf_counter()
     try:
-        _v = _plain(_fn(*_args))
+        if _spec["trace"]: sys.settrace(_tracer)
+        try: _raw = _fn(*_args)
+        finally: sys.settrace(None)
+        _v = _plain(_raw)
         _ms = (time.perf_counter() - _t) * 1000
         try: _emit({"value": _v, "ms": _ms})
         except ValueError: _emit({"error": "returned NaN or infinity"})
@@ -104,12 +129,14 @@ for _args in _spec["args"]:
         import traceback
         _tb = [f for f in traceback.extract_tb(e.__traceback__) if f.filename.endswith("solution.py")]
         _emit({"error": type(e).__name__ + ": " + str(e) + (f" (line {_tb[-1].lineno})" if _tb else "")})
+    if _spec["trace"]: _emit({"trace": _steps})
     sys.stdout.flush()
 `;
 
 const JS_MAIN = (name) => `const fs = require('node:fs');
 const spec = JSON.parse(fs.readFileSync('spec.json', 'utf8'));
 const emit = (o) => fs.writeSync(3, JSON.stringify(o) + '\\n');
+emit({ start: 1 });
 let fn;
 try {
   fn = new Function(fs.readFileSync('solution.js', 'utf8') + '\\n;return ${name};')();
@@ -180,13 +207,14 @@ ${cases
   .join('\n')}
 }
 int main() {
+  ib::emit("{\\"start\\":1}");
   ${cases.map((_, i) => `ib::case${i}();`).join('\n  ')}
 }
 `;
 
 // Files to write, an optional compile step and the run command for one language.
-export function build(language, code, signature, cases) {
-  const spec = JSON.stringify({ name: signature.name, args: cases });
+export function build(language, code, signature, cases, trace = false) {
+  const spec = JSON.stringify({ name: signature.name, args: cases, trace });
   if (language === 'python') return { files: { 'solution.py': code, 'main.py': PY_MAIN, 'spec.json': spec }, run: ['python3', '-B', 'main.py'] };
   if (language === 'javascript') return { files: { 'solution.js': code, 'main.cjs': JS_MAIN(signature.name), 'spec.json': spec }, run: ['node', 'main.cjs'] };
   if (language === 'cpp') return { files: { 'solution.cpp': code, 'main.cpp': CPP_MAIN(signature, cases) }, compile: ['clang++', '-std=c++20', '-O1', '-w', 'main.cpp', '-o', 'main'], run: ['./main'] };

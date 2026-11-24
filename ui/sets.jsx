@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
+import { AddProblem } from './add.jsx';
 import { api, Icon, Problem, useAction, useLoad, useSet } from './lib.jsx';
 
 const solved = (n, total) => `${n} of ${total} solved`;
 
 export function Sets() {
-  const { value, error, load } = useLoad('/sets', ({ sets }) => sets.some((s) => s.status === 'planning'));
+  const { value, error, load } = useLoad('/sets', ({ sets }) => sets.some((s) => s.busy));
   const remove = useAction(async (s) => {
     if (!confirm(`Delete the ${s.company} set and everything you wrote in it?`)) return;
     await api('DELETE', `/sets/${s.id}`);
@@ -29,9 +30,11 @@ export function Sets() {
             <li class="setrow" key={s.id}>
               <a href={`#/sets/${s.id}`}>
                 <h2>{s.company}</h2>
-                <span class="second">
-                  {s.role}, {s.level.toLowerCase()}
-                </span>
+                {s.role && (
+                  <span class="second">
+                    {s.role}, {s.level.toLowerCase()}
+                  </span>
+                )}
                 {s.quote && (
                   <span class="small clip">
                     <span class="mark">{s.quote}</span>
@@ -46,6 +49,7 @@ export function Sets() {
           ))}
         </ul>
       )}
+      {value && <AddProblem onAdded={({ setId }) => (location.hash = `#/sets/${setId}`)} />}
     </div>
   );
 }
@@ -111,15 +115,17 @@ export function SetPage({ params: [id] }) {
   if (!set) return <div class="page"><Problem>{error}</Problem></div>;
   const { company, role, level, posting, rounds, count } = set.intake;
   const sheet = posting || rounds;
-  const detail = (p) => `${p.subject}, ${p.difficulty.toLowerCase()}`;
+  const detail = (p) => [p.subject, p.difficulty.toLowerCase()].filter(Boolean).join(', ') || p.request;
   return (
-    <div class="page">
+    <div class={`page ${sheet ? '' : 'narrow'}`}>
       <div class="row between wrap">
         <div>
           <h1>{company}</h1>
-          <p class="second">
-            {role}, {level.toLowerCase()}
-          </p>
+          {role && (
+            <p class="second">
+              {role}, {level.toLowerCase()}
+            </p>
+          )}
         </div>
         {set.status === 'ready' && <span class="count second">{solved(set.problems.filter((p) => p.progress === 'solved').length, set.problems.length)}</span>}
       </div>
@@ -186,6 +192,7 @@ export function SetPage({ params: [id] }) {
               ))}
             </ol>
           )}
+          {set.status === 'ready' && <AddProblem setId={id} subjects={set.intake.subjects} onAdded={load} />}
         </div>
       </div>
     </div>

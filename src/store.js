@@ -56,6 +56,17 @@ export async function createSetFile(intake) {
   await writeJson(setFile(set.id), set);
   return set;
 }
+export const ensureSet = (id, make) =>
+  locked(id, async () => {
+    try {
+      return await readSet(id);
+    } catch (e) {
+      if (!(e instanceof NotFound)) throw e;
+      const set = { id, createdAt: new Date().toISOString(), error: null, problems: [], ...make };
+      await writeJson(setFile(id), set);
+      return set;
+    }
+  });
 export const deleteSet = (id) => locked(id, () => fs.rm(setFile(id)).catch((e) => Promise.reject(e.code === 'ENOENT' ? new NotFound() : e)));
 export async function listSets() {
   const names = await fs.readdir(path.join(home(), 'sets')).catch(() => []);
@@ -63,7 +74,8 @@ export async function listSets() {
   return sets.filter(Boolean).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-const DEFAULTS = { write: { provider: 'claude', model: 'sonnet', effort: '' }, grade: { provider: 'claude', model: 'sonnet', effort: '' } };
+const START = { provider: 'claude', model: 'sonnet', effort: '' };
+const DEFAULTS = { write: START, grade: START, tutor: START };
 export async function readSettings() {
   try {
     return checkSettings(await readJson(path.join(home(), 'settings.json')));
@@ -78,7 +90,7 @@ export function checkChoice(c, name = 'model') {
   if (!EFFORTS.includes(c.effort)) throw new Invalid(`Choose an effort for ${name}`);
   return { provider: c.provider, model: c.model, effort: c.effort };
 }
-export const checkSettings = (s) => ({ write: checkChoice(s?.write, 'writing problems'), grade: checkChoice(s?.grade, 'grading answers') });
+export const checkSettings = (s) => ({ write: checkChoice(s?.write, 'writing problems'), grade: checkChoice(s?.grade, 'grading answers'), tutor: checkChoice(s?.tutor ?? s?.grade, 'chat and analysis') });
 export async function saveSettings(s) {
   const clean = checkSettings(s);
   await writeJson(path.join(home(), 'settings.json'), clean);

@@ -40,8 +40,8 @@ server.on('error', (e) => {
 });
 server.listen(port, '127.0.0.1', async () => {
   const url = `http://localhost:${server.address().port}`;
-  await recoverInterrupted();
-  await sweep();
+  await recoverInterrupted().catch(console.error);
+  await sweep().catch(console.error);
   console.log(`Interview Buddy is running at ${url}\nPress Control-C to stop.`);
   openPage(url);
 });

@@ -16,7 +16,7 @@ export const isPercentUnit = (unit) => /^(%|percent)$/i.test(unit.trim());
 /** The answer is read in the problem's unit. A typed % sign is dropped when that unit is already percent. */
 export function checkNumber(text, { answer, tolerance, unit }) {
   const n = parseNumber(isPercentUnit(unit) ? String(text).replace(/%\s*$/, '') : text);
-  return n === null ? null : close(n, answer, tolerance, 1e-12);
+  return n === null ? null : close(n, answer, tolerance, answer === 0 ? 1e-12 : 0);
 }
 
 /** Finds a quote in the text ignoring case and line wrapping, and returns the words exactly as they appear. */

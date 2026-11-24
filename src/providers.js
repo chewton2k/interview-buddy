@@ -19,7 +19,18 @@ export class ProviderError extends Error {
   }
 }
 
-const OFF = ['shell_tool', 'unified_exec', 'apps', 'plugins', 'hooks', 'multi_agent', 'view_image', 'image_generation', 'code_mode_host', 'goals', 'sleep_tool'];
+// Output can skip the schema on older command versions, so it is checked here before anything relies on it.
+function misfit(v, s, at = 'reply') {
+  if (s.type === 'object') {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return at;
+    return s.required.map((k) => misfit(v[k], s.properties[k], `${at}.${k}`)).find(Boolean);
+  }
+  if (s.type === 'array') return Array.isArray(v) ? v.map((x, i) => misfit(x, s.items, `${at}[${i}]`)).find(Boolean) : at;
+  if (s.type === 'number' ? !Number.isFinite(v) : typeof v !== s.type) return at;
+  return s.enum && !s.enum.includes(v) ? at : undefined;
+}
+
+const OFF = ['shell_tool', 'unified_exec', 'apps', 'plugins', 'hooks', 'multi_agent', 'view_image', 'image_generation', 'code_mode_host', 'goals', 'sleep_tool', 'computer_use', 'browser_use', 'browser_use_external', 'in_app_browser', 'skill_search', 'tool_suggest'];
 
 export const PROVIDERS = {
   codex: {
@@ -106,12 +117,17 @@ const killTree = (child) => {
   } catch {}
 };
 export const killAll = () => running.forEach(killTree);
+/** Children stop with the app, including ones that sleep through their CPU limit. */
+export function track(child) {
+  running.add(child);
+  for (const e of ['close', 'error']) child.on(e, () => running.delete(child));
+}
 
 function runCli(command, args, { input = '', cwd = os.tmpdir(), signal, timeout = 600000 } = {}) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new ProviderError('aborted', 'Stopped'));
     const child = spawn(command, args, { cwd, env: cleanEnv(), stdio: ['pipe', 'pipe', 'pipe'], detached: true });
-    running.add(child);
+    track(child);
     let stdout = '';
     let stderr = '';
     let failure = null;
@@ -125,7 +141,6 @@ function runCli(command, args, { input = '', cwd = os.tmpdir(), signal, timeout 
     const finish = (fn, value) => {
       clearTimeout(timer);
       signal?.removeEventListener('abort', abort);
-      running.delete(child);
       fn(value);
     };
     child.stdout.setEncoding('utf8').on('data', (d) => (stdout += d));
@@ -141,7 +156,10 @@ function runCli(command, args, { input = '', cwd = os.tmpdir(), signal, timeout 
 export async function ask({ provider, model, effort, prompt, schema, signal, timeout = 600000 }) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'interview-buddy-ask-'));
   try {
-    return await PROVIDERS[provider].call({ model, effort, prompt, schema, dir, signal, timeout });
+    const value = await PROVIDERS[provider].call({ model, effort, prompt, schema, dir, signal, timeout });
+    const bad = misfit(value, schema);
+    if (bad) throw new ProviderError('badjson', `The model left out or misused ${bad}. Try again.`);
+    return value;
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

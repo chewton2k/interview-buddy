@@ -1,18 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { findQuote } from './answers.js';
-import { badSignature, close, fits, same } from './harness.js';
+import { badSignature, close, fits, same, starter } from './harness.js';
+import { fetchPage } from './link.js';
 import { ask, ProviderError } from './providers.js';
-import { runCode } from './sandbox.js';
-import { createSetFile, Invalid, listSets, readSet, readSettings, updateProblem, updateSet } from './store.js';
+import { runCode, tools } from './sandbox.js';
+import { createSetFile, ensureSet, Invalid, listSets, readSet, readSettings, updateProblem, updateSet } from './store.js';
 
 export const SUBJECTS = ['Coding', 'Quant', 'Math', 'Physics', 'Chemistry', 'Circuit design'];
 export const LEVELS = ['Intern', 'New grad', 'Mid', 'Senior'];
 const TYPES = 'int, float, string, bool, and lists of them written int[], string[][] and so on, up to three levels deep';
 const MAX_TRIES = 3;
 
-const str = { type: 'string' };
+export const str = { type: 'string' };
 const list = (items) => ({ type: 'array', items });
-const obj = (properties) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
+export const obj = (properties) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
 const oneOf = (...values) => ({ type: 'string', enum: values });
 
 export const planSchema = (subjects) => obj({ problems: list(obj({ title: str, subject: oneOf(...subjects), kind: oneOf('code', 'numeric', 'written'), difficulty: oneOf('Easy', 'Medium', 'Hard'), topic: str, quote: str })) });
@@ -24,7 +25,7 @@ export const problemSchema = {
 };
 const gradeSchema = obj({ summary: str, points: list(obj({ mark: oneOf('met', 'partial', 'missed'), note: str })) });
 
-const data = (value) => `<data>\n${JSON.stringify(value, null, 1).replace(/</g, '\\u003c')}\n</data>`;
+export const data = (value) => `<data>\n${JSON.stringify(value, null, 1).replace(/</g, '\\u003c')}\n</data>`;
 
 const text = (v, name, max, required) => {
   if (v === undefined && !required) return '';
@@ -45,6 +46,12 @@ export function checkIntake(b) {
   return { ...intake, level: b.level, count: b.count };
 }
 
+const briefSchema = (subjects) => obj({ title: str, subject: oneOf(...subjects), kind: oneOf('code', 'numeric', 'written'), difficulty: oneOf('Easy', 'Medium', 'Hard'), topic: str });
+const briefPrompt = (intake, p) => `A candidate asked for one practice problem. Plan it.
+kind is "code" for a function run against tests, "numeric" for one number as the answer, "written" for design, derivation or explanation graded on a rubric. Follow the kind they ask for. Otherwise prefer code for coding and numeric for quant, math, physics, chemistry and circuits.
+topic is two or three sentences telling the author exactly what to write. title is at most 8 words in sentence case.
+${data({ request: p.request, guidance: p.guidance, level: intake.level, ...(intake.personal ? {} : { company: intake.company, role: intake.role }), source: p.source })}`;
+
 const planPrompt = (intake) => `Plan a practice set of exactly ${intake.count} problems for the interview described below.
 Use every listed subject at least once and no other subject. Match the level, the company's domain and what the rounds test. Order from easier to harder, and vary the topics.
 kind is "code" for a function the candidate writes and runs against tests, "numeric" for one number as the answer, "written" for design, derivation or explanation that a rubric grades. Prefer code for coding subjects and numeric for quant, math, physics, chemistry and circuits. Use written where an interviewer would want the reasoning.
@@ -56,7 +63,7 @@ const rules = {
   code: `kind: code. The candidate writes one function. Types allowed: ${TYPES}. No other types, so express trees, graphs, linked lists and class designs with lists or lists of operations.
 function_name and parameter names: lowercase first letter, only letters, digits and underscores, not a keyword in Python, JavaScript or C++.
 args_json is a JSON array with one value per parameter. expected_json is the JSON return value. Give 2 or 3 examples.
-case_args_json holds 10 to 14 more inputs, inputs only. Include the smallest and empty inputs the statement allows, duplicates, negatives, extremes, and a few of 30 to 200 elements. Every input must obey the constraints in the statement and stay small enough for the brute force to finish in one second.
+case_args_json holds 10 to 14 more inputs, inputs only. Include the smallest and empty inputs the statement allows, duplicates, negatives, extremes, and a few of 30 to 200 elements. Every input must obey the constraints in the statement and stay small enough for the brute force to finish in one second. Strings use printable ASCII only.
 The answer must be unique. Use compare "unordered" only when the statement says the result may be in any order.
 solution_python is an efficient solution. brute_python solves the same task by a different, simpler method. Both define function_name with exactly those parameters, use only the standard library, never mutate shared state and never print. Both will be executed and must agree on every input.
 State constraints and the expected time complexity in the statement. Do not repeat the examples in the statement.`,
@@ -70,11 +77,18 @@ ${rules[kind]}
 ${kind === 'code' ? '' : figure}
 statement is Markdown with $...$ or $$...$$ for math. It must be complete and unambiguous on its own. Do not reveal the method. Do not use headings. Never write a dollar sign for money, write USD.
 hints: exactly 3, from gentle to nearly the method. rubric: 3 to 5 short points an interviewer would check in the reasoning or code, each one sentence. solution_text explains the full solution in Markdown.
-Write an original problem shaped by this company and role, not a copy of a published one.
-${data({ company: intake.company, role: intake.role, level: intake.level, rounds: intake.rounds, brief })}
+${brief.request ? 'Write the problem the request asks for. When there is source material, build on its idea and change the setting, the numbers and the wording, so the result is original and complete without the source.' : 'Write an original problem shaped by this company and role, not a copy of a published one.'}
+${data({ ...(intake.personal ? {} : { company: intake.company, role: intake.role, rounds: intake.rounds }), level: intake.level, brief })}
 ${problem ? `Your previous attempt was rejected by the checks: ${problem}\nWrite the whole problem again with that fixed.` : ''}`;
 
 export class Rejected extends Error {}
+
+async function trial(options) {
+  const r = await runCode(options);
+  if (r.unavailable) throw new ProviderError('missing', r.compileError);
+  return r;
+}
+const plainText = (v) => (Array.isArray(v) ? v.every(plainText) : typeof v !== 'string' || /^[\x20-\x7e\n\t]*$/.test(v));
 
 const parseJson = (s, what) => {
   try {
@@ -99,9 +113,15 @@ async function verifyCode(d) {
   for (const c of cases) {
     if (!Array.isArray(c.args) || c.args.length !== d.params.length || !c.args.every((a, i) => fits(a, d.params[i].type))) throw new Rejected(`input ${show(c.args)} does not match the parameter types`);
     if (JSON.stringify(c.args).length > 20000) throw new Rejected('an input is longer than 20,000 characters');
+    if (!plainText(c.args) || !plainText(c.expected)) throw new Rejected('strings must use only printable ASCII characters, because languages count other characters differently');
     if ('expected' in c && !fits(c.expected, d.returns)) throw new Rejected(`expected value ${show(c.expected)} is not of type ${d.returns}`);
   }
-  const runOne = (code) => runCode({ language: 'python', code, signature, cases: cases.map(({ args }) => ({ args })) });
+  for (const language of ['javascript', 'cpp']) {
+    if (!(await tools())[language]) continue;
+    const r = await trial({ language, code: starter(language, signature), signature, cases: [{ args: cases[0].args }] });
+    if (r.compileError) throw new Rejected(`the function or parameter names do not work in ${language}: ${r.compileError.slice(0, 200)}`);
+  }
+  const runOne = (code) => trial({ language: 'python', code, signature, cases: cases.map(({ args }) => ({ args })) });
   const [solution, brute] = await Promise.all([runOne(d.solution_python), runOne(d.brute_python)]);
   for (const [name, r] of [['solution_python', solution], ['brute_python', brute]]) {
     const i = r.results.findIndex((x) => x.status !== 'pass');
@@ -116,20 +136,19 @@ async function verifyCode(d) {
 }
 
 async function verifyNumeric(d) {
-  const r = await runCode({ language: 'python', code: d.solver_python, signature: { name: 'solve', params: [], returns: 'float' }, cases: [{ args: [] }] });
+  const r = await trial({ language: 'python', code: d.solver_python, signature: { name: 'solve', params: [], returns: 'float' }, cases: [{ args: [] }] });
   const { status, actual, error } = r.results[0];
   if (status !== 'pass') throw new Rejected(`solver_python failed: ${error}`);
-  if (!Number.isFinite(d.answer) || !Number.isFinite(d.tolerance)) throw new Rejected('answer and tolerance must be finite numbers');
   const tolerance = Math.min(0.05, Math.max(0.0001, d.tolerance));
-  if (!close(d.answer, actual, tolerance, 1e-12)) throw new Rejected(`the stated answer is ${d.answer} but solver_python returned ${actual}`);
+  if (!close(d.answer, actual, tolerance, actual === 0 ? 1e-12 : 0)) throw new Rejected(`the stated answer is ${d.answer} but solver_python returned ${actual}`);
   return { answer: actual, unit: d.unit.trim(), tolerance };
 }
 
 const svg = (s) => (/^\s*<svg[\s>]/i.test(s ?? '') && s.length < 60000 ? (s.includes('xmlns=') ? s : s.replace(/<svg/i, '<svg xmlns="http://www.w3.org/2000/svg"')) : '');
 
 async function verify(kind, d) {
-  if (!d.statement?.trim()) throw new Rejected('the statement is empty');
-  if (!d.rubric?.length) throw new Rejected('the rubric is empty');
+  if (!d.statement.trim()) throw new Rejected('the statement is empty');
+  if (!d.rubric.length) throw new Rejected('the rubric is empty');
   const base = { statement: d.statement, hints: d.hints.slice(0, 3), rubric: d.rubric.slice(0, 6), solutionText: d.solution_text, figure: svg(d.figure_svg) };
   if (kind === 'code') return { ...base, ...(await verifyCode(d)) };
   if (kind === 'numeric') return { ...base, ...(await verifyNumeric(d)) };
@@ -147,7 +166,6 @@ export async function writeProblem({ intake, brief, choice, signal, onStep = () 
       return await verify(brief.kind, draft);
     } catch (e) {
       if (e instanceof Rejected || e.kind === 'badjson') reason = e.message;
-      else if (e instanceof TypeError) reason = 'the reply was missing fields the schema requires';
       else throw e;
     }
   }
@@ -157,7 +175,7 @@ export async function writeProblem({ intake, brief, choice, signal, onStep = () 
 async function plan(intake, choice, signal) {
   for (let attempt = 1; ; attempt++) {
     const { problems } = await ask({ ...choice, prompt: planPrompt(intake), schema: planSchema(intake.subjects), signal });
-    const briefs = (problems ?? []).slice(0, intake.count).filter((p) => p && problemSchema[p.kind] && intake.subjects.includes(p.subject));
+    const briefs = problems.slice(0, intake.count);
     const missing = intake.subjects.filter((s) => !briefs.some((b) => b.subject === s));
     if (briefs.length === intake.count && !missing.length) {
       return briefs.map((b) => ({ ...b, quote: findQuote(intake.posting, b.quote) ?? findQuote(intake.rounds, b.quote) ?? '' }));
@@ -165,6 +183,8 @@ async function plan(intake, choice, signal) {
     if (attempt === 2) throw new ProviderError('badjson', missing.length ? `The plan left out ${missing.join(', ')}. Try again or pick another model.` : 'The plan had the wrong number of problems. Try again or pick another model.');
   }
 }
+
+const blank = (b) => ({ id: randomUUID(), ...b, status: 'queued', step: null, error: null, body: null, progress: 'open', draft: {}, feedback: null });
 
 const jobs = new Map();
 const STOPS = ['auth', 'rate', 'timeout', 'missing'];
@@ -181,6 +201,20 @@ async function turn(fn) {
   }
 }
 
+async function planOne(intake, p, choice, signal, put) {
+  const patch = {};
+  if (p.links.length && !p.source) {
+    await put({ status: 'writing', step: 'Reading the link' });
+    patch.source = (await Promise.all(p.links.map((l) => fetchPage(l, { signal })))).join('\n\n');
+  }
+  await put({ status: 'writing', step: 'Planning', ...patch });
+  const subjects = p.subject ? [p.subject] : [...new Set([...SUBJECTS, ...intake.subjects])];
+  const { title, subject, kind, difficulty, topic } = await ask({ ...choice, prompt: briefPrompt(intake, { ...p, ...patch }), schema: briefSchema(subjects), signal });
+  Object.assign(patch, { title, subject, kind, difficulty, topic });
+  await put(patch);
+  return patch;
+}
+
 async function generate(setId, pid, job) {
   if (job.signal.aborted) return;
   const set = await readSet(setId);
@@ -189,8 +223,9 @@ async function generate(setId, pid, job) {
   const put = (patch) => updateProblem(setId, pid, (p) => void Object.assign(p, patch));
   try {
     const { write } = await readSettings();
-    const { title, subject, kind, difficulty, topic } = brief;
-    const body = await writeProblem({ intake: set.intake, brief: { title, subject, kind, difficulty, topic }, choice: write, signal: job.signal, onStep: (step) => put({ status: 'writing', step }) });
+    if (brief.request && !brief.kind) Object.assign(brief, await planOne(set.intake, brief, write, job.signal, put));
+    const { title, subject, kind, difficulty, topic, request, guidance, source } = brief;
+    const body = await writeProblem({ intake: set.intake, brief: { title, subject, kind, difficulty, topic, request, guidance, source }, choice: write, signal: job.signal, onStep: (step) => put({ status: 'writing', step }) });
     await put({ status: 'ready', step: null, error: null, body });
   } catch (e) {
     if (job.signal.aborted) return;
@@ -207,7 +242,7 @@ function jobFor(setId) {
   if (!jobs.has(setId)) jobs.set(setId, { controller: new AbortController(), count: 0 });
   return jobs.get(setId);
 }
-async function tracked(setId, fn) {
+export async function tracked(setId, fn) {
   const job = jobFor(setId);
   job.count++;
   try {
@@ -229,7 +264,7 @@ async function planAndRun(setId) {
       const briefs = await turn(() => plan(intake, write, job.signal));
       const pids = await updateSet(setId, (s) => {
         s.status = 'ready';
-        s.problems = briefs.map((b) => ({ id: randomUUID(), ...b, status: 'queued', step: null, error: null, body: null, progress: 'open', draft: {}, feedback: null }));
+        s.problems = briefs.map((b) => blank(b));
         return s.problems.map((p) => p.id);
       });
       await runQueued(setId, pids, job);
@@ -245,6 +280,23 @@ export async function createSet(body) {
   planAndRun(set.id);
   return set;
 }
+
+export const checkRequest = (b) => ({ request: text(b?.request, 'Link or idea', 6000, true), subject: b.subject ? text(b.subject, 'Subject', 40, true) : '' });
+
+/** Adds one problem made from a link or an idea. Only `links` are opened, never links found elsewhere. */
+export async function addProblem(setId, { request, subject, links, guidance = '' }) {
+  const p = blank({ title: 'New problem', subject, kind: '', difficulty: '', topic: '', quote: '', request, guidance, links });
+  await updateSet(setId, (s) => {
+    if (s.status !== 'ready') throw new Invalid('Wait until this set is planned');
+    if (s.problems.length >= 100) throw new Invalid('This set is full. Start another one.');
+    s.problems.push(p);
+  });
+  tracked(setId, (job) => runQueued(setId, [p.id], job));
+  return p.id;
+}
+
+const PERSONAL = '00000000-0000-4000-8000-000000000000';
+export const personalSet = async () => (await ensureSet(PERSONAL, { status: 'ready', intake: { company: 'My problems', role: '', posting: '', rounds: '', subjects: SUBJECTS, level: 'Mid', count: 1, personal: true } })).id;
 
 export async function retrySet(setId) {
   await updateSet(setId, (s) => {
@@ -271,6 +323,10 @@ export async function recoverInterrupted() {
     await updateSet(id, (s) => {
       if (s.status === 'planning') Object.assign(s, { status: 'failed', error: message });
       for (const p of s.problems) if (p.status === 'queued' || p.status === 'writing') Object.assign(p, { status: 'failed', step: null, error: message });
+      for (const p of s.problems) {
+        if (p.chatBusy) Object.assign(p, { chatBusy: false, chatError: message });
+        if (p.visual?.status === 'working') Object.assign(p.visual, { status: 'failed', step: null, error: message });
+      }
     });
   }
 }
@@ -281,7 +337,7 @@ export async function grade({ problem, answer, outcome, signal }) {
   const prompt = `Grade this interview answer as a fair, specific interviewer. Give one entry in points for each of the ${rubric.length} rubric points, in order. mark is met, partial or missed. note is one or two sentences addressed to the candidate that point at what they wrote, and is empty when the point is fully met. summary is two sentences with the single most useful next step. Grade only what is written. Use $...$ for math.
 ${data({ statement, rubric, reference: solutionCode ?? solutionText, correct_answer: correct === undefined ? undefined : `${correct} ${unit}`, outcome, candidate_answer: answer })}`;
   const g = await ask({ ...choice, prompt, schema: gradeSchema, signal });
-  if (g.points?.length !== rubric.length) throw new ProviderError('badjson', 'The grader skipped part of the rubric. Try again.');
+  if (g.points.length !== rubric.length) throw new ProviderError('badjson', 'The grader skipped part of the rubric. Try again.');
   const score = g.points.reduce((s, p) => s + (p.mark === 'met' ? 1 : p.mark === 'partial' ? 0.5 : 0), 0) / rubric.length;
   return { summary: g.summary, score, points: g.points.map((p, i) => ({ point: rubric[i], mark: p.mark, note: p.note })) };
 }

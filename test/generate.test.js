@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { brief, calls, clearCalls, code, intake, numeric, replies, written } from './stub/setup.js';
 import { checkNumber, findQuote, parseNumber } from '../src/answers.js';
@@ -53,6 +54,10 @@ const rejected = {
   'empty statement': { statement: ' ' },
   'missing rubric': { rubric: [] },
   'missing fields': { examples: undefined },
+  'string outside ASCII': { params: [{ name: 'x', type: 'string' }], case_args_json: ['["h\u00e9"]'] },
+  'name that C++ reserves': { function_name: 'compl', solution_python: 'def compl(x):\n    return x * 2', brute_python: 'def compl(x):\n    return x + x' },
+  'name that C++ already defines': { function_name: 'abs', solution_python: 'def abs(x):\n    return x * 2', brute_python: 'def abs(x):\n    return x + x' },
+  'non-text hint': { hints: [1, 2, 3] },
   'huge input': { params: [{ name: 'x', type: 'string' }], case_args_json: [JSON.stringify(['x'.repeat(20001)])] },
 };
 for (const [name, over] of Object.entries(rejected)) {
@@ -133,8 +138,12 @@ test('deleting a set stops its running calls', async () => {
   replies([plan(brief()), { match: 'Write one', hang: true }]);
   const { id } = await createSet(intake);
   while ((await readSet(id)).problems[0]?.status !== 'writing') await new Promise((r) => setTimeout(r, 25));
+  const alive = () => spawnSync('pgrep', ['-f', `${process.env.STUB_DIR}/bin/claude`]).status === 0;
+  assert.ok(alive());
   stopSet(id);
   await deleteSet(id);
+  for (let i = 0; alive() && i < 50; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.ok(!alive());
   await assert.rejects(readSet(id));
   await assert.rejects(deleteSet(id));
 });
@@ -176,6 +185,8 @@ test('number parsing and checking', () => {
   assert.equal(checkNumber('63', p), true);
   assert.equal(checkNumber('60', p), false);
   assert.equal(checkNumber('x', p), null);
+  assert.equal(checkNumber('0', { answer: 1.6e-19, tolerance: 0.01, unit: 'C' }), false);
+  assert.equal(checkNumber('1.6e-19', { answer: 1.602e-19, tolerance: 0.01, unit: 'C' }), true);
   assert.equal(checkNumber('0', { answer: 0, tolerance: 0.01, unit: '' }), true);
   assert.equal(checkNumber('25%', { answer: 25, tolerance: 0.01, unit: '%' }), true);
   assert.equal(checkNumber('25%', { answer: 0.25, tolerance: 0.01, unit: '' }), true);
@@ -185,4 +196,17 @@ test('quotes are matched across case and line breaks and returned as written', (
   assert.equal(findQuote('We Want\n  clean code (always)', 'want clean code (always)'), 'Want\n  clean code (always)');
   assert.equal(findQuote('We expect calm reasoning.', '"expect calm reasoning."'), 'expect calm reasoning');
   for (const q of ['one', '', 'a '.repeat(30), 'not there']) assert.equal(findQuote('some text here', q), null);
+});
+
+test('a computer that cannot run code is reported once, without more model calls', async () => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { value: 'linux' });
+  try {
+    for (const [kind, reply] of [['code', code()], ['numeric', numeric()]]) {
+      await assert.rejects(tryWrite([write(reply)], brief({ kind })), (e) => e.kind === 'missing' && /macOS only/.test(e.message));
+      assert.equal(calls().length, 1);
+    }
+  } finally {
+    Object.defineProperty(process, 'platform', platform);
+  }
 });

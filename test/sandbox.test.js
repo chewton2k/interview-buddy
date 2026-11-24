@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
 import { badSignature, fits, same, starter } from '../src/harness.js';
-import { runCode, selfTest, LANGUAGES } from '../src/sandbox.js';
+import { killAll } from '../src/providers.js';
+import { LANGUAGES, runCode, selfTest, sweep } from '../src/sandbox.js';
 
 const add = { name: 'addAll', params: [{ name: 'xs', type: 'int[]' }, { name: 'label', type: 'string' }], returns: 'int' };
 const cases = [
@@ -52,7 +56,7 @@ for (const language of LANGUAGES) {
   });
   test(`${language} starter code compiles`, async () => {
     const r = await runCode({ language, code: starter(language, add), signature: add, cases: [cases[0]], timeout: 5000 });
-    assert.ok(!/SyntaxError|undeclared|unknown type/.test(r.compileError ?? ''), r.compileError);
+    assert.equal(r.compileError, null);
   });
 }
 
@@ -86,7 +90,7 @@ test('wrong types, NaN and output floods are refused', async () => {
   assert.equal((await run('function f() { return 1 / 0 }', 'javascript')).results[0].status, 'error');
   assert.equal((await run('function f() { }', 'javascript')).results[0].status, 'error');
   assert.match((await run('def f():\n    while True: print("x" * 10000)')).results[0].error, /1 MB/);
-  assert.match((await run('def f():\n    a = []\n    while True: a.append(bytes(50_000_000).replace(b"\\0", b"x"))')).results[0].error, /memory|longer|MemoryError/i);
+  assert.match((await run('def f():\n    a = []\n    import time\n    for _ in range(40): a.append(b"x" * 50_000_000)\n    time.sleep(3)\n    return 1.0')).results[0].error, /1 GB of memory|MemoryError/);
 });
 
 test('sandbox refuses home, writes, network, fork and inherited environment', async () => {
@@ -97,7 +101,7 @@ test('sandbox refuses home, writes, network, fork and inherited environment', as
 test('sandbox failure never falls back to an unsandboxed run', async () => {
   for (const sandbox of ['/usr/bin/false', '/nonexistent']) {
     const r = await runCode({ language: 'python', code: good.python, signature: add, cases, sandbox });
-    assert.ok(r.compileError);
+    assert.ok(r.unavailable && r.compileError);
     assert.ok(r.results.every((x) => x.status === 'error'));
   }
 });
@@ -118,4 +122,53 @@ test('value checks and comparison', () => {
   assert.ok(!same([1, 2], [2, 1]) && same([1, 2], [2, 1], 'unordered') && !same([1, 1], [1, 2], 'unordered') && !same([1], [1, 1]));
   assert.ok(same([[1, 2], [3]], [[3], [1, 2]], 'unordered') && !same([[2, 1]], [[1, 2]], 'unordered'));
   assert.ok(!same(1, '1') && same('a', 'a') && same(0, 1e-12) && !same(1000000, 1000001) && !same([1], 1));
+});
+
+test('trace records real values at each line, survives errors and is capped', async () => {
+  const signature = { name: 'f', params: [{ name: 'xs', type: 'int[]' }], returns: 'int' };
+  const run = (code, args = [[1, 2]], language = 'python') => runCode({ language, code, signature, cases: [{ args }], trace: true, timeout: 5000 });
+  const r = await run('import collections\ndef f(xs):\n    seen = set()\n    q = collections.deque()\n    d = {}\n    for x in xs:\n        seen.add(x); q.append(x); d[x] = [x]\n        xs[0] += 1\n    return len(seen)\n');
+  assert.equal(r.results[0].status, 'pass');
+  const last = r.trace.at(-1);
+  assert.deepEqual([last.event, last.value, last.function], ['return', 2, 'f']);
+  assert.deepEqual([last.vars.seen, last.vars.q, last.vars.d], [{ set: [1, 2] }, { deque: [1, 2] }, { 1: [1], 2: [2] }]);
+  assert.ok(r.trace.some((s) => s.vars.xs[0] === 1) && last.vars.xs[0] === 3);
+  const bad = await run('def f(xs):\n    return xs[9]\n');
+  assert.match(bad.results[0].error, /IndexError/);
+  assert.ok(bad.trace.some((s) => s.event === 'exception'));
+  assert.equal((await run('def f(xs):\n    t = 0\n    for i in range(5000): t += i\n    return t\n')).trace.length, 400);
+  assert.equal((await run('def f(xs):\n    while True: pass\n')).results[0].status, 'timeout');
+  assert.equal((await run('const f = (xs) => xs.length', [[1]], 'javascript')).trace, undefined);
+  assert.equal((await runCode({ language: 'python', code: 'def f(xs):\n    return 1\n', signature, cases: [{ args: [[]] }] })).trace, undefined);
+});
+
+test('folders without permissions are cleaned up', async () => {
+  const r = await runCode({ language: 'python', code: 'import os\ndef f():\n    os.mkdir("d"); open("d/x", "w").close(); os.chmod("d", 0)\n    return os.getcwd()', signature: { name: 'f', params: [], returns: 'string' }, cases: [{ args: [] }] });
+  assert.equal(r.results[0].status, 'pass');
+  assert.equal(fs.existsSync(r.results[0].actual), false);
+  const old = path.join(os.tmpdir(), 'interview-buddy-run-testold');
+  fs.mkdirSync(path.join(old, 'd'), { recursive: true });
+  fs.chmodSync(path.join(old, 'd'), 0);
+  fs.utimesSync(old, 1, 1);
+  await sweep();
+  assert.equal(fs.existsSync(old), false);
+});
+
+test('stopping the app stops code that is asleep', async () => {
+  const running = runCode({ language: 'python', code: 'import time\ndef f():\n    time.sleep(60)\n    return 1', signature: { name: 'f', params: [], returns: 'int' }, cases: [{ args: [] }], timeout: 30000 });
+  await new Promise((r) => setTimeout(r, 700));
+  const started = Date.now();
+  killAll();
+  assert.match((await running).results[0].error, /Crashed \(SIGKILL\)/);
+  assert.ok(Date.now() - started < 3000);
+});
+
+test('leaving early is an error on that test, not a compile error', async () => {
+  const signature = { name: 'f', params: [], returns: 'int' };
+  for (const [language, code] of [['python', 'import os\ndef f():\n    os._exit(3)'], ['javascript', 'function f() { process.exit(3) }'], ['cpp', 'long long f() { exit(3); }']]) {
+    const r = await runCode({ language, code, signature, cases: [{ args: [] }, { args: [] }] });
+    assert.equal(r.compileError, null, language);
+    assert.deepEqual(r.results.map((x) => x.status), ['error', 'skipped']);
+    assert.match(r.results[0].error, /code 3/);
+  }
 });

@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { Analysis } from './analysis.jsx';
+import { Chat } from './chat.jsx';
 import { Editor } from './editor.jsx';
 import { api, Icon, Line, Problem, Prose, useAction, useDebounced, useSet } from './lib.jsx';
 
@@ -18,27 +20,42 @@ function Values({ signature, args, children }) {
   );
 }
 
+const short = (s) => (s.length > 160 ? `${s.slice(0, 157)}...` : s);
+const hostOf = (link) => new URL(link).hostname.replace(/^www\./, '');
+
+function Source({ set, problem }) {
+  if (problem.request) {
+    return (
+      <p class="from">
+        <span class="second">From your request</span> <span class="mark on">{short(problem.request)}</span>
+        {problem.links.map((l) => (
+          <span key={l}>
+            {' '}
+            <a href={l} target="_blank" rel="noreferrer">{hostOf(l)}</a>
+          </span>
+        ))}
+      </p>
+    );
+  }
+  if (!problem.quote) return null;
+  return (
+    <p class="from">
+      <span class="second">{set.intake.posting.includes(problem.quote) ? 'From the posting' : 'From your notes'}</span> <span class="mark on">{problem.quote}</span>
+    </p>
+  );
+}
+
 function Brief({ set, problem }) {
   const { body } = problem;
-  const from = set.intake.posting.includes(problem.quote) ? 'From the posting' : 'From your notes';
   return (
-    <section class="brief" aria-label="Problem">
       <div class="stack">
-        <a class="row small second back" href={`#/sets/${set.id}`}>
-          <Icon name="back" />
-          {set.intake.company}
-        </a>
         <h1>{problem.title}</h1>
         <div class="meta">
           <span>{problem.subject}</span>
           <span>{problem.difficulty}</span>
           <span>{CHECKED[problem.kind]}</span>
         </div>
-        {problem.quote && (
-          <p class="from">
-            <span class="second">{from}</span> <span class="mark on">{problem.quote}</span>
-          </p>
-        )}
+        <Source set={set} problem={problem} />
         <Prose text={body.statement} />
         <Figure svg={body.figure} />
         {body.cases?.slice(0, body.exampleCount).map((c, i) => (
@@ -68,7 +85,6 @@ function Brief({ set, problem }) {
           </details>
         </div>
       </div>
-    </section>
   );
 }
 
@@ -90,7 +106,7 @@ function Feedback({ feedback }) {
   );
 }
 
-function CodeWork({ set, problem, at }) {
+function CodeWork({ problem, at, work, analyze }) {
   const { body, draft } = problem;
   const [language, setLanguage] = useState(draft.language ?? 'python');
   const [code, setCode] = useState({ ...problem.starters, ...draft.code });
@@ -106,15 +122,15 @@ function CodeWork({ set, problem, at }) {
   };
   const run = useAction(async (how) => {
     const r = await api('POST', `${at}/${how}`, { language, code: code[language] });
-    setShown({ ...r, how });
+    setShown({ ...r, how, language, code: code[language] });
     setPick(Math.max(0, r.results.findIndex((x) => x.status !== 'pass')));
   });
   const passed = shown?.results.filter((r) => r.status === 'pass').length;
   const ask = useAction(async () => {
-    const outcome = shown ? `${passed} of ${shown.results.length} tests pass in ${LANGUAGES[language]}` : '';
-    setFeedback((await api('POST', `${at}/feedback`, { answer: code[language], outcome })).feedback);
+    setFeedback((await api('POST', `${at}/feedback`, { answer: code[language], outcome: work.current.outcome })).feedback);
   });
   const result = shown?.results[pick];
+  work.current = { language, code: code[language], outcome: shown?.language === language && shown.code === code[language] ? `${passed} of ${shown.results.length} ${shown.how === 'run' ? 'examples' : 'tests'} pass in ${LANGUAGES[language]}` : '' };
   const busy = run.busy || ask.busy;
   return (
     <section class="work" aria-label="Your solution">
@@ -154,10 +170,13 @@ function CodeWork({ set, problem, at }) {
               ) : (
                 <p class="second">Run the examples, then submit to run all {body.cases.length} tests</p>
               )}
-              <button class="btn" disabled={busy} onClick={() => ask.run()}>
-                {ask.busy && <Icon name="load" />}
-                Get feedback
-              </button>
+              <span class="row">
+                <button class="btn" disabled={busy} onClick={() => ask.run()}>
+                  {ask.busy && <Icon name="load" />}
+                  Get feedback
+                </button>
+                <button class="btn" disabled={analyze.busy || problem.visual?.status === 'working'} onClick={() => analyze.run()}>Analyze</button>
+              </span>
             </div>
           )}
           {shown && !run.busy && shown.compileError && <pre class="out bad">{shown.compileError}</pre>}
@@ -194,7 +213,7 @@ function CodeWork({ set, problem, at }) {
   );
 }
 
-function TextWork({ problem, at }) {
+function TextWork({ problem, at, work, analyze }) {
   const { body, draft, kind } = problem;
   const [answer, setAnswer] = useState(draft.answer ?? '');
   const [working, setWorking] = useState(draft.working ?? '');
@@ -204,6 +223,7 @@ function TextWork({ problem, at }) {
   const edit = (a, w) => {
     setAnswer(a);
     setWorking(w);
+    if (a !== answer) setVerdict(null);
     save({ answer: a, working: w });
   };
   const check = useAction(async () => {
@@ -217,6 +237,7 @@ function TextWork({ problem, at }) {
     setFeedback((await api('POST', `${at}/feedback`, { answer: said, outcome })).feedback);
   });
   const numeric = kind === 'numeric';
+  work.current = { answer, working, outcome: verdict ? (verdict.correct ? 'The number is correct' : 'The number is not correct') : '' };
   return (
     <section class="work plain" aria-label="Your answer">
       <form
@@ -246,6 +267,7 @@ function TextWork({ problem, at }) {
             {ask.busy && <Icon name="load" />}
             {numeric ? 'Get feedback' : 'Grade answer'}
           </button>
+          <button type="button" class="btn" disabled={analyze.busy || problem.visual?.status === 'working'} onClick={() => analyze.run()}>Analyze</button>
         </div>
         <div aria-live="polite" class="stack">
           <Problem>{check.error || ask.error}</Problem>
@@ -266,28 +288,82 @@ function TextWork({ problem, at }) {
   );
 }
 
+const remembered = () => {
+  try {
+    return localStorage.getItem('ask') ?? (innerWidth >= 1280 ? 'open' : 'closed');
+  } catch {
+    return 'closed';
+  }
+};
+
 export function ProblemPage({ params: [id, pid] }) {
-  const { value, error } = useSet(id);
+  const { value, error, load } = useSet(id);
+  const [tab, setTab] = useState('problem');
+  const [ask, setAsk] = useState(remembered);
+  const work = useRef({});
+  const at = `/sets/${id}/problems/${pid}`;
+  const analyze = useAction(async () => {
+    setTab('analysis');
+    await api('POST', `${at}/analyze`, work.current);
+    await load();
+  });
   const set = value?.set;
   const problem = set?.problems.find((p) => p.id === pid);
   useEffect(() => void (problem && (document.title = `${problem.title}, Interview Buddy`)), [problem?.title]);
   if (!problem || problem.status !== 'ready') {
     return (
       <div class="page narrow">
-        <Problem>{error}</Problem>
+        {problem && <h1>{problem.title}</h1>}
+        <Problem>{error || problem?.error}</Problem>
+        {['queued', 'writing'].includes(problem?.status) && (
+          <p class="row second" role="status">
+            <Icon name="load" /> {problem.step ?? 'Waiting'}
+          </p>
+        )}
         {set && (
           <p>
-            This problem is not ready. <a href={`#/sets/${id}`}>Back to {set.intake.company}</a>
+            <a href={`#/sets/${id}`}>Back to {set.intake.company}</a>
           </p>
         )}
       </div>
     );
   }
+  const show = (state) => {
+    setAsk(state);
+    try {
+      localStorage.setItem('ask', state);
+    } catch {}
+  };
   const Work = problem.kind === 'code' ? CodeWork : TextWork;
+  const tabs = { problem: 'Problem', analysis: 'Analysis' };
   return (
-    <div class="bench">
-      <Brief set={set} problem={problem} />
-      <Work set={set} problem={problem} at={`/sets/${id}/problems/${pid}`} />
+    <div class={`bench ${ask === 'open' ? 'asking' : ''} ${tab}`}>
+      <section class="brief" aria-label="Problem">
+        <div class="stack">
+          <div class="row between wrap">
+            <a class="row small second back" href={`#/sets/${id}`}>
+              <Icon name="back" />
+              {set.intake.company}
+            </a>
+            <span class="row">
+              <span class="cases" role="group" aria-label="Show">
+                {Object.entries(tabs).map(([k, label]) => (
+                  <button key={k} class="case" aria-pressed={tab === k} onClick={() => setTab(k)}>{label}</button>
+                ))}
+              </span>
+              {ask !== 'open' && (
+                <button class="btn" onClick={() => show('open')}>
+                  <Icon name="chat" />
+                  Ask
+                </button>
+              )}
+            </span>
+          </div>
+          {tab === 'problem' ? <Brief set={set} problem={problem} /> : <Analysis problem={problem} at={at} analyze={analyze} reload={load} />}
+        </div>
+      </section>
+      <Work problem={problem} at={at} work={work} analyze={analyze} />
+      {ask === 'open' && <Chat setId={id} problem={problem} at={at} work={work} reload={load} onClose={() => show('closed')} />}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, Icon, Problem, useAction, useDebounced, useLoad } from './lib.jsx';
 
-const JOBS = { write: 'Write problems', grade: 'Grade answers' };
+const JOBS = { write: 'Write problems', grade: 'Grade answers', tutor: 'Chat and analyze' };
 const EFFORTS = { '': 'Default', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high' };
 
 function Job({ id, choice, providers, onChange }) {
