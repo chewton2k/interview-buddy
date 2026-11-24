@@ -37,7 +37,8 @@ const runCheck = (html, check) =>
 async function runChecks(html, checks) {
   const focused = document.activeElement;
   const results = [];
-  for (let i = 0; i < checks.length; i += 3) results.push(...(await Promise.all(checks.slice(i, i + 3).map((c) => runCheck(html, c)))));
+  // One at a time, because only one frame can hold keyboard focus.
+  for (const c of checks) results.push(await runCheck(html, c));
   focused?.focus?.();
   return results;
 }
