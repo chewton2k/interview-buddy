@@ -70,15 +70,34 @@ function cppLiteral(v, t) {
   return String(v);
 }
 
-export function starter(language, { name, params, returns }) {
+const pyLiteral = (v) => (Array.isArray(v) ? `[${v.map(pyLiteral).join(', ')}]` : typeof v === 'boolean' ? (v ? 'True' : 'False') : JSON.stringify(v));
+const jsLiteral = (v) => (Array.isArray(v) ? `[${v.map(jsLiteral).join(', ')}]` : JSON.stringify(v));
+const cppPlain = (v) => (Array.isArray(v) ? `{${v.map(cppPlain).join(', ')}}` : JSON.stringify(v));
+const LONG = 300;
+
+function cppPrint(type) {
+  if (type.endsWith('[][]')) return '    for (const auto& row : result) {\n        for (const auto& x : row) cout << x << " ";\n        cout << endl;\n    }\n';
+  if (type.endsWith('[]')) return '    for (const auto& x : result) cout << x << " ";\n    cout << endl;\n';
+  return '    cout << boolalpha << result << endl;\n';
+}
+
+/** Starting file for the pad. It calls the function on the first example, so Run shows something straight away. */
+export function starter(language, { name, params, returns }, example) {
   if (language === 'sql') return 'SELECT\n';
-  if (language === 'python') return `def ${name}(${params.map((p) => `${p.name}: ${pyType(p.type)}`).join(', ')}) -> ${pyType(returns)}:\n    pass\n`;
+  const args = example && JSON.stringify(example).length <= LONG ? example : null;
+  if (language === 'python') {
+    const main = args ? `\n\nif __name__ == "__main__":\n    print(${name}(${args.map(pyLiteral).join(', ')}))\n` : '';
+    return `def ${name}(${params.map((p) => `${p.name}: ${pyType(p.type)}`).join(', ')}) -> ${pyType(returns)}:\n    pass\n${main}`;
+  }
   if (language === 'javascript') {
     const doc = [...params.map((p) => ` * @param {${jsType(p.type)}} ${p.name}`), ` * @returns {${jsType(returns)}}`].join('\n');
-    return `/**\n${doc}\n */\nfunction ${name}(${params.map((p) => p.name).join(', ')}) {\n\n}\n`;
+    const main = args ? `\nif (require.main === module) {\n  console.log(${name}(${args.map(jsLiteral).join(', ')}));\n}\n` : '';
+    return `/**\n${doc}\n */\nfunction ${name}(${params.map((p) => p.name).join(', ')}) {\n\n}\n${main}`;
   }
-  const args = params.map((p) => `${cppType(p.type)}${p.type.endsWith(']') || p.type === 'string' ? '& ' : ' '}${p.name}`).join(', ');
-  return `using namespace std;\n\n${cppType(returns)} ${name}(${args}) {\n\n    return {};\n}\n`;
+  const list = params.map((p) => `${cppType(p.type)}${p.type.endsWith(']') || p.type === 'string' ? '& ' : ' '}${p.name}`).join(', ');
+  const depth = (returns.match(/\[\]/g) ?? []).length;
+  const main = args && depth < 3 ? `\nint main() {\n${params.map((p, i) => `    ${cppType(p.type)} ${p.name} = ${cppPlain(args[i])};\n`).join('')}    auto result = ${name}(${params.map((p) => p.name).join(', ')});\n${cppPrint(returns)}}\n` : '';
+  return `#include <iostream>\n#include <string>\n#include <vector>\nusing namespace std;\n\n${cppType(returns)} ${name}(${list}) {\n\n    return {};\n}\n${main}`;
 }
 
 const PY_MAIN = `import json, os, sys, time
@@ -87,11 +106,16 @@ _spec = json.load(open("spec.json"))
 def _emit(o):
     _out.write(json.dumps(o, allow_nan=False) + "\\n"); _out.flush()
 _emit({"start": 1})
+# A pad file also holds the writer's own calls and asserts. They run, but only a missing function stops the tests.
+_ns = {"__name__": "solution"}
+_why = None
 try:
-    import solution
-    _fn = getattr(solution, _spec["name"])
+    exec(compile(open("solution.py").read(), "solution.py", "exec"), _ns)
 except BaseException as e:
-    _emit({"load": type(e).__name__ + ": " + str(e)}); sys.exit(0)
+    _why = type(e).__name__ + ": " + str(e)
+_fn = _ns.get(_spec["name"])
+if not callable(_fn):
+    _emit({"load": _why or "NameError: " + _spec["name"] + " is not defined"}); sys.exit(0)
 _steps = []
 def _snap(v, depth=0):
     if isinstance(v, bool) or v is None or isinstance(v, int): return v
@@ -138,11 +162,13 @@ const JS_MAIN = (name) => `const fs = require('node:fs');
 const spec = JSON.parse(fs.readFileSync('spec.json', 'utf8'));
 const emit = (o) => fs.writeSync(3, JSON.stringify(o) + '\\n');
 emit({ start: 1 });
+const vm = require('node:vm');
+Object.assign(globalThis, { require: (name) => require(name), module: {}, exports: {} });
 let fn;
-try {
-  fn = new Function(fs.readFileSync('solution.js', 'utf8') + '\\n;return ${name};')();
-  if (typeof fn !== 'function') throw new TypeError('${name} is not a function');
-} catch (e) { emit({ load: String(e) }); process.exit(0); }
+let why;
+try { vm.runInThisContext(fs.readFileSync('solution.js', 'utf8'), { filename: 'solution.js' }); } catch (e) { why = String(e); }
+try { fn = vm.runInThisContext('${name}'); } catch (e) { why ??= String(e); }
+if (typeof fn !== 'function') { emit({ load: why ?? '${name} is not a function' }); process.exit(0); }
 const finite = (v) => Array.isArray(v) ? v.every(finite) : typeof v !== 'number' || Number.isFinite(v);
 for (const args of spec.args) {
   const t = performance.now();
@@ -154,7 +180,7 @@ for (const args of spec.args) {
 }
 `;
 
-const CPP_MAIN = ({ name, params, returns }, cases) => `#include <algorithm>
+const CPP_HEADERS = `#include <algorithm>
 #include <array>
 #include <bitset>
 #include <chrono>
@@ -179,7 +205,10 @@ const CPP_MAIN = ({ name, params, returns }, cases) => `#include <algorithm>
 #include <utility>
 #include <vector>
 #include <unistd.h>
+`;
+const CPP_MAIN = ({ name, params, returns }, cases) => `${CPP_HEADERS}#define main ib_user_main
 #include "solution.cpp"
+#undef main
 namespace ib {
 using std::string; using std::vector;
 string show(long long v) { return std::to_string(v); }
@@ -233,4 +262,26 @@ export function build(language, code, signature, cases, trace = false) {
   if (language === 'javascript') return { files: { 'solution.js': code, 'main.cjs': JS_MAIN(signature.name), 'spec.json': spec }, run: ['node', 'main.cjs'] };
   if (language === 'cpp') return { files: { 'solution.cpp': code, 'main.cpp': CPP_MAIN(signature, cases) }, compile: ['clang++', '-std=c++20', '-O1', '-w', 'main.cpp', '-o', 'main'], run: ['./main'] };
   throw new Error(`Unknown language ${language}`);
+}
+
+const SQL_PRINT = (sql, data) => `${SQL_WRAP(sql)}
+db = sqlite3.connect(":memory:"); db.executescript(base64.b64decode("${Buffer.from(data).toString('base64')}").decode())
+cur = db.execute(SQL)
+if cur.description is None:
+    print("The query returned no table")
+else:
+    rows = [[d[0] for d in cur.description]] + [[_text(v) for v in r] for r in cur.fetchall()]
+    width = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
+    line = lambda r: "  ".join(c.ljust(w) for c, w in zip(r, width)).rstrip()
+    print(line(rows[0])); print("  ".join("-" * w for w in width))
+    for r in rows[1:]: print(line(r))
+    print("\\n" + str(len(rows) - 1) + (" row" if len(rows) == 2 else " rows"))
+`;
+
+/** The file as written, run the way a terminal would run it. */
+export function program(language, code, data) {
+  if (language === 'python') return { files: { 'main.py': code }, run: ['python3', '-B', '-u', 'main.py'] };
+  if (language === 'javascript') return { files: { 'main.cjs': code }, run: ['node', 'main.cjs'] };
+  if (language === 'sql') return { files: { 'main.py': SQL_PRINT(code, data) }, run: ['python3', '-B', 'main.py'] };
+  return { files: { 'main.cpp': `${CPP_HEADERS}#line 1 "main.cpp"\n${code}` }, compile: ['clang++', '-std=c++20', '-O1', '-w', 'main.cpp', '-o', 'main'], run: ['./main'] };
 }

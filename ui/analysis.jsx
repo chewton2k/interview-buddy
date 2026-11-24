@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { api, Icon, Problem, Prose, useAction } from './lib.jsx';
+import { api, Icon, Problem, Prose, useAction, useTheme } from './lib.jsx';
 
 export function Analysis({ problem, at, analyze, reload }) {
   const { visual } = problem;
+  const theme = useTheme();
   const frame = useRef();
   const [broken, setBroken] = useState('');
   const repair = useAction(async (error) => {
@@ -25,7 +26,7 @@ export function Analysis({ problem, at, analyze, reload }) {
     };
     addEventListener('message', listen);
     return () => removeEventListener('message', listen);
-  }, [ready, visual?.version]);
+  }, [ready, visual?.version, theme]);
 
   const again = (
     <button class="btn" disabled={analyze.busy || visual?.status === 'working'} onClick={() => analyze.run()}>
@@ -56,7 +57,7 @@ export function Analysis({ problem, at, analyze, reload }) {
         <>
           <Problem>{visual.error}</Problem>
           <Prose text={visual.summary} />
-          <iframe key={visual.version} ref={frame} title="Drawing of your solution" sandbox="allow-scripts" src={`/api${at}/visual?v=${visual.version}`} />
+          <iframe key={`${visual.version} ${theme}`} ref={frame} title="Drawing of your solution" sandbox="allow-scripts" src={`/api${at}/visual?v=${visual.version}&theme=${theme}`} />
           <div class="row wrap between">
             <span class="small second">{{ all: 'Recorded from your run', start: 'First 400 steps recorded from your run' }[visual.recorded] ?? 'Drawn from your work'}</span>
             <span class="row">

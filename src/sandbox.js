@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { track } from './providers.js';
-import { badSignature, build, fits, same } from './harness.js';
+import { badSignature, build, fits, program, same } from './harness.js';
 
 const exec = promisify(execFile);
 const PREFIX = 'interview-buddy-run-';
@@ -105,58 +105,78 @@ export function runCode(options) {
   return slot(() => run(options));
 }
 
-async function run({ language, code, signature, cases, compare = 'exact', timeout = 10000, trace = false, sandbox = '/usr/bin/sandbox-exec' }) {
-  const fail = (compileError) => ({ results: cases.map(() => ({ status: 'error', error: compileError })), stdout: '', compileError });
-  const unavailable = (why) => ({ ...fail(why), unavailable: true });
-  if (process.platform !== 'darwin') return unavailable('Code runs on macOS only for now.');
-  const bad = badSignature(signature);
-  if (bad) return fail(bad);
-  const misfit = cases.findIndex((c) => !Array.isArray(c.args) || c.args.length !== signature.params.length || !c.args.every((a, i) => fits(a, signature.params[i].type)));
-  if (misfit >= 0) return fail(`Test ${misfit + 1} does not match the function signature`);
+/** Writes the files, compiles when needed and runs. `blocked` means this computer could not run it at all. */
+async function execute(plan, language, { timeout, sandbox }) {
+  const blocked = (why) => ({ blocked: why });
+  if (process.platform !== 'darwin') return blocked('Code runs on macOS only for now.');
   const tool = (await tools())[language === 'sql' ? 'python' : language];
-  if (!tool) return unavailable(language !== 'cpp' ? 'python3 was not found. Install Python 3 and restart.' : 'clang++ was not found. Run xcode-select --install and restart.');
-
+  if (!tool) return blocked(language !== 'cpp' ? 'python3 was not found. Install Python 3 and restart.' : 'clang++ was not found. Run xcode-select --install and restart.');
   const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), PREFIX)));
+  const refused = (r) => r.spawnError ?? (/^sandbox-exec:/.test(r.stderr) ? r.stderr.trim() : null);
+  const tidy = (text) => text.replaceAll(`${dir}/`, '');
   try {
-    const plan = build(language, code, signature, cases.map((c) => c.args), trace);
     await Promise.all(Object.entries(plan.files).map(([f, text]) => fs.writeFile(path.join(dir, f), text)));
     const reads = tool.prefix ? [tool.prefix, path.dirname(tool.bin)] : [];
     if (plan.compile) {
       const c = await launch(dir, [tool.bin, ...plan.compile.slice(1)], { fork: true, timeout: 30000, reads, sandbox });
-      if (c.spawnError || /^sandbox-exec:/.test(c.stderr)) return unavailable(`The sandbox could not start: ${c.spawnError ?? c.stderr.trim()}`);
-      if (c.code !== 0) return fail((c.reason && `Compiling stopped: ${c.reason}`) ?? (c.stderr.trim() || 'Compiling failed'));
+      if (refused(c)) return blocked(`The sandbox could not start: ${refused(c)}`);
+      if (c.code !== 0) return { compileError: (c.reason && `Compiling stopped: ${c.reason}`) ?? (tidy(c.stderr).trim() || 'Compiling failed') };
     }
-    const command = plan.compile ? [path.join(dir, 'main')] : [tool.bin, ...plan.run.slice(1)];
-    const r = await launch(dir, command, { timeout, reads, sandbox });
-    const lines = r.channel.split('\n').filter(Boolean);
-    const parsed = [];
-    let steps;
-    let traceCut = false;
-    let started = false;
-    for (const line of lines) {
-      try {
-        const o = JSON.parse(line);
-        if (o.start) started = true;
-        else if (o.trace) [steps, traceCut] = [o.trace, o.cut];
-        else parsed.push(o);
-      } catch {
-        break;
-      }
-    }
-    if (!started && !r.reason && !r.signal && r.code <= 128) return unavailable(`The sandbox could not start: ${r.spawnError ?? (r.stderr.trim() || `exit code ${r.code}`)}`);
-    if (parsed[0]?.load) return { ...fail(parsed[0].load), stdout: r.stdout };
-    const stopped = WHY[r.reason] ?? (r.signal === 'SIGXCPU' ? WHY.timeout : r.signal || r.code > 128 ? `Crashed (${r.signal ?? `signal ${r.code - 128}`})` : r.stderr.trim() || `Exited with code ${r.code} before this test finished`);
-    const results = cases.map((c, i) => {
-      const p = parsed[i];
-      if (!p) return i === parsed.length ? { status: stopped === WHY.timeout ? 'timeout' : 'error', error: stopped } : { status: 'skipped', error: 'Not run' };
-      if ('error' in p) return { status: 'error', error: p.error };
-      if (!fits(p.value, signature.returns)) return { status: 'fail', actual: p.value, ms: p.ms, error: `Expected a value of type ${signature.returns}` };
-      return { status: 'expected' in c && !same(p.value, c.expected, compare) ? 'fail' : 'pass', actual: p.value, ms: p.ms };
-    });
-    return { results, stdout: r.stdout, compileError: null, trace: steps, traceCut };
+    const started = performance.now();
+    const r = await launch(dir, plan.compile ? [path.join(dir, 'main'), ...plan.run.slice(1)] : [tool.bin, ...plan.run.slice(1)], { timeout, reads, sandbox });
+    if (refused(r)) return blocked(`The sandbox could not start: ${refused(r)}`);
+    return { r: { ...r, stdout: tidy(r.stdout), stderr: tidy(r.stderr), ms: performance.now() - started } };
   } finally {
     await discard(dir);
   }
+}
+
+/** Runs the file as a program and returns what a terminal would show. */
+export const runProgram = ({ language, code, data = '', timeout = 10000, sandbox = '/usr/bin/sandbox-exec' }) =>
+  slot(async () => {
+    const { blocked, compileError, r } = await execute(program(language, code, data), language, { timeout, sandbox });
+    if (blocked ?? compileError) return { stdout: '', stderr: blocked ?? compileError, failed: true, note: blocked ? 'Not run' : 'Did not compile' };
+    const died = r.signal ?? (r.code > 128 ? `signal ${r.code - 128}` : null);
+    const note = WHY[r.reason] ?? (died ? `Crashed (${died})` : r.code ? `Exited with code ${r.code}` : `Finished in ${Math.round(r.ms)} ms`);
+    return { stdout: r.stdout, stderr: r.stderr, failed: Boolean(r.reason || died || r.code), note };
+  });
+
+async function run({ language, code, signature, cases, compare = 'exact', timeout = 10000, trace = false, sandbox = '/usr/bin/sandbox-exec' }) {
+  const fail = (compileError) => ({ results: cases.map(() => ({ status: 'error', error: compileError })), stdout: '', compileError });
+  const unavailable = (why) => ({ ...fail(why), unavailable: true });
+  const bad = badSignature(signature);
+  if (bad) return fail(bad);
+  const misfit = cases.findIndex((c) => !Array.isArray(c.args) || c.args.length !== signature.params.length || !c.args.every((a, i) => fits(a, signature.params[i].type)));
+  if (misfit >= 0) return fail(`Test ${misfit + 1} does not match the function signature`);
+  const { blocked, compileError, r } = await execute(build(language, code, signature, cases.map((c) => c.args), trace), language, { timeout, sandbox });
+  if (blocked) return unavailable(blocked);
+  if (compileError) return fail(compileError);
+
+  const parsed = [];
+  let steps;
+  let traceCut = false;
+  let started = false;
+  for (const line of r.channel.split('\n').filter(Boolean)) {
+    try {
+      const o = JSON.parse(line);
+      if (o.start) started = true;
+      else if (o.trace) [steps, traceCut] = [o.trace, o.cut];
+      else parsed.push(o);
+    } catch {
+      break;
+    }
+  }
+  if (!started && !r.reason && !r.signal && r.code <= 128) return unavailable(`The sandbox could not start: ${r.stderr.trim() || `exit code ${r.code}`}`);
+  if (parsed[0]?.load) return { ...fail(parsed[0].load), stdout: r.stdout };
+  const stopped = WHY[r.reason] ?? (r.signal === 'SIGXCPU' ? WHY.timeout : r.signal || r.code > 128 ? `Crashed (${r.signal ?? `signal ${r.code - 128}`})` : r.stderr.trim() || `Exited with code ${r.code} before this test finished`);
+  const results = cases.map((c, i) => {
+    const p = parsed[i];
+    if (!p) return i === parsed.length ? { status: stopped === WHY.timeout ? 'timeout' : 'error', error: stopped } : { status: 'skipped', error: 'Not run' };
+    if ('error' in p) return { status: 'error', error: p.error };
+    if (!fits(p.value, signature.returns)) return { status: 'fail', actual: p.value, ms: p.ms, error: `Expected a value of type ${signature.returns}` };
+    return { status: 'expected' in c && !same(p.value, c.expected, compare) ? 'fail' : 'pass', actual: p.value, ms: p.ms };
+  });
+  return { results, stdout: r.stdout, compileError: null, trace: steps, traceCut };
 }
 
 // Code under test can leave folders without permissions behind.

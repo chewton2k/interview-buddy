@@ -22,7 +22,7 @@ export function Intake() {
   const { value: options } = useLoad('/options');
   const { value: saved } = useLoad('/settings');
   const { value: status } = useLoad('/status');
-  const account = saved && status?.providers.find((p) => p.id === saved.settings.write.provider);
+  const account = saved && status?.providers.find((p) => p.id === saved.settings.provider);
   const make = useAction(async () => {
     const extra = (other ?? '').split(',').map((s) => s.trim()).filter(Boolean);
     const { id } = await api('POST', '/sets', { ...form, subjects: [...form.subjects, ...extra] });
@@ -110,7 +110,7 @@ export function Intake() {
             <button class="btn primary big" disabled={make.busy}>
               Make practice set
             </button>
-            {saved && <span class="small muted">Written by {modelName(saved.settings.write, status)}</span>}
+            {saved && <span class="small muted">Written by {modelName(saved.settings, status)}</span>}
           </div>
         </div>
       </form>

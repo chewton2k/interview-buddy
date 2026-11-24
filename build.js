@@ -36,7 +36,7 @@ const face = (name) => {
   return `@font-face{font-family:"Atkinson Hyperlegible ${name === 'next' ? 'Next' : 'Mono'} Variable";font-weight:200 800;src:url(data:font/woff2;base64,${fs.readFileSync(file, 'base64')}) format("woff2")}`;
 };
 fs.writeFileSync('dist/stage.css', `${face('next')}${face('mono')}${fs.readFileSync('ui/stage.css', 'utf8')}`);
-for (const page of ['index.html', 'preview.html']) fs.copyFileSync(`ui/${page}`, `dist/${page}`);
+for (const page of ['index.html', 'preview.html', 'theme.js']) fs.copyFileSync(`ui/${page}`, `dist/${page}`);
 // The canvas and the equation editor load their own fonts. The 12 MB Chinese handwriting font is left out.
 fs.cpSync('node_modules/@excalidraw/excalidraw/dist/prod/fonts', 'dist/fonts', { recursive: true, filter: (f) => !f.includes('Xiaolai') });
 fs.cpSync('node_modules/mathlive/fonts', 'dist/fonts/math', { recursive: true });

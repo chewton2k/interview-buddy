@@ -1,82 +1,14 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, Icon, Problem, useAction, useDebounced, useLoad } from './lib.jsx';
 
-const JOBS = { write: 'Write problems', grade: 'Grade answers', tutor: 'Chat and analyze' };
-const EFFORTS = { '': 'Default', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high' };
-
-function Job({ id, choice, providers, onChange }) {
-  const models = providers?.find((p) => p.id === choice.provider)?.models ?? [];
-  const [typing, setTyping] = useState(false);
-  const known = choice.model === '' || models.some((m) => m.id === choice.model);
-  const typed = typing || (providers && !known);
-  const [ok, setOk] = useState(false);
-  const test = useAction(async () => {
-    setOk(false);
-    await api('POST', '/settings/test', choice);
-    setOk(true);
-  });
-  const change = (patch) => {
-    setOk(false);
-    onChange({ ...choice, ...patch });
-  };
-  return (
-    <div class="stack tight">
-      <h3>{JOBS[id]}</h3>
-      <div class="trio">
-        <div class="field">
-          <label for={`${id}-account`}>Account</label>
-          <select
-            id={`${id}-account`}
-            class="input"
-            value={choice.provider}
-            onChange={(e) => {
-              setTyping(false);
-              change({ provider: e.target.value, model: '' });
-            }}
-          >
-            {providers?.map((p) => <option key={p.id} value={p.id}>{p.label}</option>) ?? <option value={choice.provider}>{choice.provider}</option>}
-          </select>
-        </div>
-        <div class="field">
-          <label for={`${id}-model`}>Model</label>
-          <select
-            id={`${id}-model`}
-            class="input"
-            value={typed ? '\0' : choice.model}
-            onChange={(e) => {
-              setTyping(e.target.value === '\0');
-              if (e.target.value !== '\0') change({ model: e.target.value });
-            }}
-          >
-            <option value="">Account default</option>
-            {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-            {!providers && !known && <option value={choice.model}>{choice.model}</option>}
-            <option value={'\0'}>Type a model id</option>
-          </select>
-          {typed && <input class="input mono" aria-label="Model id" autoComplete="off" spellcheck={false} value={choice.model} onInput={(e) => change({ model: e.target.value.trim() })} />}
-        </div>
-        <div class="field">
-          <label for={`${id}-effort`}>Effort</label>
-          <select id={`${id}-effort`} class="input" value={choice.effort} onChange={(e) => change({ effort: e.target.value })}>
-            {Object.entries(EFFORTS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
-        </div>
-        <button class="btn tall" disabled={test.busy} aria-label={`Test ${JOBS[id].toLowerCase()}`} onClick={() => test.run()}>
-          {test.busy ? <Icon name="load" /> : ok ? <Icon name="check" /> : null}
-          {ok ? 'Works' : 'Test'}
-        </button>
-      </div>
-      <Problem>{test.error}</Problem>
-    </div>
-  );
-}
+const THEMES = { system: 'Match system', light: 'Light', dark: 'Dark' };
 
 function Account({ name, detail, ok, good, todo }) {
   return (
     <div class="account">
       <h3>{name}</h3>
       <span class="second">{detail}</span>
-      {ok === undefined ? <span /> : <span class={`row ${ok ? 'good' : 'bad'}`}><Icon name={ok ? 'check' : 'x'} />{ok ? good : todo}</span>}
+      <span class={`row ${ok ? 'good' : 'bad'}`}><Icon name={ok ? 'check' : 'x'} />{ok ? good : todo}</span>
     </div>
   );
 }
@@ -84,42 +16,112 @@ function Account({ name, detail, ok, good, todo }) {
 export function Settings() {
   const { value: saved, error } = useLoad('/settings');
   const { value: status, error: statusError } = useLoad('/status');
-  const [settings, setSettings] = useState(null);
+  const [choice, setChoice] = useState(null);
+  const [typing, setTyping] = useState(false);
   const [note, setNote] = useState('');
-  const put = useAction(async (s) => {
-    await api('PUT', '/settings', s);
+  const [ok, setOk] = useState(false);
+  const [theme, setTheme] = useState(window.theme.choice);
+  const put = useAction(async (c) => {
+    await api('PUT', '/settings', c);
     setNote('Saved');
   });
-  const save = useDebounced((s) => put.run(s), 400);
+  const save = useDebounced((c) => put.run(c), 400);
+  const test = useAction(async () => {
+    setOk(false);
+    await api('POST', '/settings/test', choice);
+    setOk(true);
+  });
   useEffect(() => void (document.title = 'Settings, Interview Buddy'), []);
-  useEffect(() => void (saved && setSettings(saved.settings)), [saved]);
-  const change = (id) => (choice) => {
-    const next = { ...settings, [id]: choice };
-    setSettings(next);
+  useEffect(() => void (saved && setChoice(saved.settings)), [saved]);
+  const change = (next) => {
+    setChoice(next);
     setNote('');
+    setOk(false);
     save(next);
   };
+  const account = choice && status?.providers.find((p) => p.id === choice.provider);
+  const models = account?.models ?? [];
+  const known = !choice || choice.model === '' || models.some((m) => m.id === choice.model);
+  const typed = typing || (status && !known);
   const langs = status?.languages;
   return (
     <div class="page narrow">
       <h1>Settings</h1>
       <Problem>{error || statusError || put.error}</Problem>
-      <section class="panel" aria-labelledby="models">
+      <section class="panel" aria-labelledby="model-title">
         <div class="row between">
-          <h2 id="models">Models</h2>
+          <h2 id="model-title">Model</h2>
           <span class="small second" role="status">{note}</span>
         </div>
-        {settings && Object.keys(JOBS).map((id) => <Job key={id} id={id} choice={settings[id]} providers={status?.providers} onChange={change(id)} />)}
+        {choice && (
+          <>
+            <fieldset class="field">
+              <legend>Account</legend>
+              <div class="chips">
+                {[['claude', 'Claude'], ['codex', 'Codex']].map(([id, label]) => (
+                  <label class="chip" key={id}>
+                    <input
+                      type="radio"
+                      name="account"
+                      checked={choice.provider === id}
+                      onChange={() => {
+                        setTyping(false);
+                        change({ provider: id, model: '' });
+                      }}
+                    />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+              {account && (account.signedIn ? <span class="hint row"><Icon name="check" /> Signed in on this computer, version {account.version}</span> : <span class="hint">{account.installed ? 'Not signed in.' : 'Not installed.'} Run <code class="mono">{account.signIn}</code> in a terminal, then reload</span>)}
+            </fieldset>
+            <div class="pick">
+              <div class="field">
+                <label for="model">Model</label>
+                <select
+                  id="model"
+                  class="input"
+                  value={typed ? '\0' : choice.model}
+                  onChange={(e) => {
+                    setTyping(e.target.value === '\0');
+                    if (e.target.value !== '\0') change({ ...choice, model: e.target.value });
+                  }}
+                >
+                  <option value="">Account default</option>
+                  {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                  {!status && !known && <option value={choice.model}>{choice.model}</option>}
+                  <option value={'\0'}>Type a model id</option>
+                </select>
+                {typed && <input class="input mono" aria-label="Model id" autoComplete="off" spellcheck={false} value={choice.model} onInput={(e) => change({ ...choice, model: e.target.value.trim() })} />}
+              </div>
+              <button class="btn tall" disabled={test.busy} aria-label="Test this model" onClick={() => test.run()}>
+                {test.busy ? <Icon name="load" /> : ok ? <Icon name="check" /> : null}
+                {ok ? 'Works' : 'Test'}
+              </button>
+            </div>
+            <Problem>{test.error}</Problem>
+            <p class="small second">Used for everything: writing problems, the interviewer, feedback and analysis. Interview Buddy uses your sign-in and ignores API keys.</p>
+          </>
+        )}
       </section>
-      <section class="panel" aria-labelledby="accounts">
-        <h2 id="accounts">Accounts on this computer</h2>
-        <div>
-          {!status && <p class="row second"><Icon name="load" /> Checking</p>}
-          {status?.providers.map((p) => (
-            <Account key={p.id} name={p.label} ok={p.signedIn} good="Signed in" todo={p.installed ? 'Not signed in' : 'Not installed'} detail={p.signedIn ? `${p.id} ${p.version}` : <>Run <code class="mono">{p.signIn}</code> in a terminal, then reload</>} />
+      <section class="panel" aria-labelledby="look">
+        <h2 id="look">Appearance</h2>
+        <div class="chips" role="radiogroup" aria-labelledby="look">
+          {Object.entries(THEMES).map(([id, label]) => (
+            <label class="chip" key={id}>
+              <input
+                type="radio"
+                name="theme"
+                checked={theme === id}
+                onChange={() => {
+                  window.theme.set(id);
+                  setTheme(id);
+                }}
+              />
+              <span>{label}</span>
+            </label>
           ))}
         </div>
-        <p class="small second">Interview Buddy uses these sign-ins and ignores API keys.</p>
       </section>
       <section class="panel" aria-labelledby="runner">
         <h2 id="runner">Code runner</h2>

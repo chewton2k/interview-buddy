@@ -89,7 +89,7 @@ test('grading, chat and analysis see the drawing', async () => {
   const { problems } = await readSet(id);
   replies([
     { match: 'Grade this', reply: { summary: 's', points: [{ mark: 'met', note: '' }, { mark: 'met', note: '' }] } },
-    { match: 'interview partner', reply: { reply: 'r', new_problem: '' } },
+    { match: 'last message in the transcript', reply: { reply: 'r', new_problem: '' } },
     { match: 'interactive picture', reply: { summary: 's', html: '<p>x</p>' } },
   ]);
   clearCalls();

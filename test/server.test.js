@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
+import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { brief, calls, clearCalls, code, intake, numeric, replies, sql, ui, written } from './stub/setup.js';
 import { createServer } from '../src/server.js';
@@ -30,28 +31,88 @@ async function ready(id) {
   }
 }
 
-test('settings choose the account, model and effort for each job', async () => {
-  const settings = { write: { provider: 'codex', model: 'gpt-x', effort: 'high' }, grade: { provider: 'claude', model: 'haiku', effort: '' }, tutor: { provider: 'claude', model: 'opus', effort: 'low' } };
+test('one account and model reach every kind of call', async () => {
+  const settings = { provider: 'codex', model: 'gpt-x' };
   assert.equal((await call('PUT', '/api/settings', settings)).status, 200);
   assert.deepEqual((await call('GET', '/api/settings')).json.settings, settings);
-  replies([{ match: 'Plan a', reply: { problems: [brief()] } }, { match: 'Write one', reply: code() }, { match: 'Grade this', reply: { summary: 's', points: [{ mark: 'met', note: '' }, { mark: 'met', note: '' }] } }]);
+  replies([
+    { match: 'Plan a', reply: { problems: [brief()] } },
+    { match: 'Write one', reply: code() },
+    { match: 'Grade this', reply: { summary: 's', points: [{ mark: 'met', note: '' }, { mark: 'met', note: '' }] } },
+    { match: 'last message in the transcript', reply: { reply: 'ok', new_problem: '' } },
+    { match: 'interactive picture', reply: { summary: 's', html: '<p>x</p>' } },
+  ]);
   clearCalls();
   const { id } = (await call('POST', '/api/sets', intake)).json;
   const set = await ready(id);
   const at = `/api/sets/${id}/problems/${set.problems[0].id}`;
-  assert.equal((await call('POST', `${at}/feedback`, { answer: 'def twice(x): return 2*x', outcome: 'all pass' })).json.feedback.score, 1);
-  let c = calls();
-  assert.deepEqual(c.map((x) => x.name), ['codex', 'codex', 'claude']);
-  for (const x of c.slice(0, 2)) assert.ok(x.args.join(' ').includes('--model gpt-x') && x.args.includes('model_reasoning_effort=high'));
-  assert.ok(c[2].args.join(' ').includes('--model haiku'));
-  await call('PUT', '/api/settings', { ...settings, grade: { provider: 'codex', model: 'gpt-y', effort: 'low' } });
+  const everything = async () => {
+    const before = calls().length;
+    assert.equal((await call('POST', `${at}/feedback`, { answer: 'def twice(x): return 2*x', outcome: 'all pass' })).json.feedback.score, 1);
+    await call('POST', `${at}/chat`, { message: 'hi' });
+    await call('POST', `${at}/analyze`, { language: 'python', code: 'def twice(x):\n    return 2 * x' });
+    for (let i = 0; calls().length < before + 3 && i < 300; i++) await new Promise((r) => setTimeout(r, 20));
+    await new Promise((r) => setTimeout(r, 200));
+  };
+  await everything();
+  assert.equal(calls().length, 5);
+  for (const c of calls()) assert.ok(c.name === 'codex' && c.args.join(' ').includes('--model gpt-x') && c.args.includes('model_reasoning_effort=medium'), c.name);
+  await call('PUT', '/api/settings', { provider: 'claude', model: 'opus' });
   clearCalls();
-  await call('POST', `${at}/feedback`, { answer: 'x' });
-  c = calls();
-  assert.ok(c[0].name === 'codex' && c[0].args.join(' ').includes('--model gpt-y'));
-  const { tutor, ...older } = settings;
-  assert.deepEqual((await call('PUT', '/api/settings', older)).json.settings.tutor, older.grade);
-  assert.equal((await call('PUT', '/api/settings', { ...settings, write: { provider: 'codex', model: '-x', effort: '' } })).status, 400);
+  await everything();
+  for (const c of calls()) assert.ok(c.name === 'claude' && c.args.join(' ').includes('--model opus'), c.name);
+  for (const bad of [{ provider: 'codex', model: '-x' }, { provider: 'gemini', model: '' }, {}]) assert.equal((await call('PUT', '/api/settings', bad)).status, 400);
+  const old = { write: { provider: 'codex', model: 'gpt-old', effort: 'high' }, grade: { provider: 'claude', model: 'haiku', effort: '' } };
+  fs.writeFileSync(path.join(process.env.INTERVIEW_BUDDY_HOME, 'settings.json'), JSON.stringify(old));
+  assert.deepEqual((await call('GET', '/api/settings')).json.settings, { provider: 'codex', model: 'gpt-old' });
+  fs.writeFileSync(path.join(process.env.INTERVIEW_BUDDY_HOME, 'settings.json'), '{broken');
+  assert.deepEqual((await call('GET', '/api/settings')).json.settings, { provider: 'claude', model: 'sonnet' });
+});
+
+test('the pad runs the file, keeps tests the user wrote and times the interview', async () => {
+  replies([{ match: 'Plan a', reply: { problems: [brief(), brief({ kind: 'sql' }), brief({ kind: 'written' })] } }, { match: 'kind: code.', reply: code() }, { match: 'kind: sql.', reply: sql() }, { match: 'kind: written.', reply: written() }]);
+  const { id } = (await call('POST', '/api/sets', { ...intake, count: 3 })).json;
+  const set = await ready(id);
+  const [c, q, w] = set.problems.map((p) => `/api/sets/${id}/problems/${p.id}`);
+  const problem = async (i = 0) => (await ready(id)).problems[i];
+
+  const starter = set.problems[0].starters;
+  assert.match(starter.python, /print\(twice\(1\)\)/);
+  const out = (await call('POST', `${c}/program`, { language: 'python', code: 'print("hi")\nraise ValueError("boom")' })).json;
+  assert.ok(out.stdout === 'hi\n' && /ValueError: boom/.test(out.stderr) && out.failed && !/private|var\/folders/.test(out.stderr), JSON.stringify(out));
+  assert.match((await call('POST', `${q}/program`, { code: 'SELECT name, SUM(v) AS total FROM t GROUP BY name' })).json.stdout, /name  total\n----  -----\na     3\n\n1 row\n/);
+
+  const blank = (await call('POST', `${c}/tests`, { args: ['21'], expected: '' })).json.test;
+  assert.deepEqual([blank.args, blank.expected, blank.reference], [[21], 42, undefined]);
+  const wrong = (await call('POST', `${c}/tests`, { args: ['5'], expected: '11' })).json.test;
+  assert.deepEqual([wrong.expected, wrong.reference], [11, 10]);
+  for (const bad of [{ args: ['x'] }, { args: ['1.5'] }, { args: [] }, { args: ['1', '2'] }, { args: 'x' }, { args: ['1'], expected: '"a"' }, { args: [5] }]) assert.equal((await call('POST', `${c}/tests`, bad)).status, 400, JSON.stringify(bad));
+  assert.equal((await call('POST', `${w}/tests`, { args: [] })).status, 400);
+
+  const good = { language: 'python', code: 'def twice(x):\n    return x * 2' };
+  let r = (await call('POST', `${c}/run`, good)).json;
+  assert.deepEqual(r.tests.map((t) => t.label), ['Example 1', 'Example 2', 'Your test 1', 'Your test 2']);
+  assert.deepEqual(r.results.map((x) => x.status), ['pass', 'pass', 'pass', 'fail']);
+  r = (await call('POST', `${c}/submit`, good)).json;
+  assert.equal(r.results.length, 8);
+  assert.equal((await problem()).progress, 'solved');
+  await call('PUT', `${c}/draft`, { language: 'python', code: { python: 'x' } });
+  assert.equal((await problem()).tests.length, 2);
+  assert.equal((await call('DELETE', `${c}/tests/${wrong.id}`)).status, 200);
+  assert.equal((await call('DELETE', `${c}/tests/${wrong.id}`)).status, 404);
+  assert.equal((await problem()).tests.length, 1);
+  const rows = (await call('POST', `${q}/tests`, { args: ["CREATE TABLE t (name TEXT, v REAL); INSERT INTO t VALUES ('z', 4);"], expected: '' })).json.test;
+  assert.deepEqual(rows.expected, [['z', '4']]);
+
+  assert.equal((await call('POST', `${c}/session`, { action: 'start', minutes: 45 })).status, 200);
+  assert.ok((await problem()).session.startedAt);
+  await call('POST', `${c}/session`, { action: 'end' });
+  assert.ok((await problem()).session.endedAt && (await problem()).session.minutes === 45);
+  await call('POST', `${c}/session`, { action: 'clear' });
+  assert.equal((await problem()).session, null);
+  for (const bad of [{ action: 'start', minutes: 7 }, { action: 'nope' }]) assert.equal((await call('POST', `${c}/session`, bad)).status, 400);
+  assert.equal((await call('POST', `${w}/session`, { action: 'end' })).status, 400);
+  assert.equal((await call('POST', `${w}/program`, { language: 'python', code: '' })).status, 400);
 });
 
 test('a set can be listed, solved in every kind and deleted', async () => {

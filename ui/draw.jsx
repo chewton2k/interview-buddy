@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { Icon, Problem } from './lib.jsx';
+import { Icon, Problem, useTheme } from './lib.jsx';
 
-export function Draw({ elements, onChange }) {
+/** The canvas is rebuilt with the current drawing when the theme changes. */
+export function Draw(props) {
+  const theme = useTheme();
+  return <Canvas key={theme} theme={theme} {...props} />;
+}
+
+function Canvas({ theme, elements, onChange }) {
   const host = useRef();
   const [state, setState] = useState('loading');
   const latest = useRef(onChange);
@@ -12,7 +18,7 @@ export function Draw({ elements, onChange }) {
     import('./canvas.jsx').then(
       async ({ mount }) => {
         if (gone) return;
-        unmount = await mount(host.current, { elements, dark: matchMedia('(prefers-color-scheme: dark)').matches, onChange: (list) => latest.current(list) });
+        unmount = await mount(host.current, { elements, dark: theme === 'dark', onChange: (list) => latest.current(list) });
         if (gone) return unmount();
         setState('ready');
       },

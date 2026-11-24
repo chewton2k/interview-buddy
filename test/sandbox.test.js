@@ -5,7 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { badSignature, fits, same, starter } from '../src/harness.js';
 import { killAll } from '../src/providers.js';
-import { LANGUAGES, runCode, selfTest, sweep } from '../src/sandbox.js';
+import { LANGUAGES, runCode, runProgram, selfTest, sweep } from '../src/sandbox.js';
 
 const add = { name: 'addAll', params: [{ name: 'xs', type: 'int[]' }, { name: 'label', type: 'string' }], returns: 'int' };
 const cases = [
@@ -172,4 +172,49 @@ test('leaving early is an error on that test, not a compile error', async () => 
     assert.deepEqual(r.results.map((x) => x.status), ['error', 'skipped']);
     assert.match(r.results[0].error, /code 3/);
   }
+});
+
+test('pad files with their own main, prints and failing asserts still test', async () => {
+  const signature = { name: 'twice', params: [{ name: 'x', type: 'int' }], returns: 'int' };
+  const pads = {
+    python: 'def twice(x):\n    return 2 * x\n\nprint("loose")\nif __name__ == "__main__":\n    print("main", twice(4))\nassert twice(1) == 3\n',
+    javascript: "const assert = require('node:assert');\nconst twice = (x) => 2 * x;\nconsole.log('loose');\nif (require.main === module) console.log('main', twice(4));\nassert.equal(twice(1), 3);\n",
+    cpp: '#include <cassert>\n#include <iostream>\nusing namespace std;\nlong long twice(long long x) { return 2 * x; }\nint main() { cout << "main " << twice(4) << endl; assert(twice(1) == 3); }\n',
+  };
+  for (const [language, code] of Object.entries(pads)) {
+    const t = await runCode({ language, code, signature, cases: [{ args: [3], expected: 6 }, { args: [0], expected: 0 }] });
+    assert.deepEqual(t.results.map((r) => r.status), ['pass', 'pass'], `${language} ${t.compileError}`);
+    assert.ok(!t.stdout.includes('main'));
+    const p = await runProgram({ language, code });
+    assert.ok(p.stdout.includes('main 8') && p.failed && /[Aa]ssert/.test(p.stderr), `${language} ${JSON.stringify(p)}`);
+  }
+  for (const [language, code] of [['python', 'def twice(x):\n    return 2 * x\nwhile True: pass'], ['javascript', 'const twice = (x) => 2 * x; process.exit(2)']]) {
+    const t = await runCode({ language, code, signature, cases: [{ args: [1], expected: 2 }], timeout: 1500 });
+    assert.notEqual(t.results[0].status, 'pass');
+  }
+});
+
+test('programs report exit, crash, timeout, compile errors and a sandbox that will not start', async () => {
+  assert.deepEqual(await runProgram({ language: 'python', code: 'print(1)' }).then((r) => [r.stdout, r.failed, /^Finished in \d+ ms$/.test(r.note)]), ['1\n', false, true]);
+  assert.equal((await runProgram({ language: 'python', code: 'import sys; sys.exit(3)' })).note, 'Exited with code 3');
+  assert.match((await runProgram({ language: 'cpp', code: 'int main() { *(volatile int*)0 = 1; }' })).note, /Crashed/);
+  assert.match((await runProgram({ language: 'javascript', code: 'while (true);', timeout: 800 })).note, /longer/);
+  const c = await runProgram({ language: 'cpp', code: 'int main() {\n  return nope;\n}' });
+  assert.ok(c.note === 'Did not compile' && /main\.cpp:2/.test(c.stderr) && !c.stderr.includes('/var/folders'), c.stderr);
+  assert.equal((await runProgram({ language: 'python', code: 'print(1)', sandbox: '/nonexistent' })).note, 'Not run');
+  assert.match((await runProgram({ language: 'python', code: 'open("/private/tmp/ib-x", "w")' })).stderr, /PermissionError/);
+  assert.match((await runProgram({ language: 'sql', code: 'SELEC', data: '' })).stderr, /syntax error/);
+});
+
+test('starting files run as they are in every language', async () => {
+  const shapes = [['int', 1], ['float', 1.5], ['string', 'a "q"'], ['bool', true], ['int[]', [1, 2]], ['string[][]', [['a'], []]], ['bool[]', [true, false]]];
+  for (const [type, value] of shapes) {
+    const signature = { name: 'f', params: [{ name: 'a', type }, { name: 'b', type: 'int[][]' }], returns: type };
+    for (const language of LANGUAGES) {
+      const code = starter(language, signature, [value, [[1], [2, 3]]]);
+      const p = await runProgram({ language, code });
+      assert.ok(!p.failed, `${language} ${type} ${p.stderr}\n${code}`);
+    }
+  }
+  assert.ok(!starter('python', { name: 'f', params: [{ name: 'a', type: 'string' }], returns: 'int' }, ['x'.repeat(400)]).includes('__main__'));
 });

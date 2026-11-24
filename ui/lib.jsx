@@ -60,6 +60,17 @@ export function useLoad(path, again = () => false) {
 }
 export const useSet = (id) => useLoad(`/sets/${id}`, ({ set }) => set.status === 'planning' || set.problems.some((p) => ['queued', 'writing'].includes(p.status) || p.chatBusy || p.visual?.status === 'working'));
 
+export function useTheme() {
+  const now = () => document.documentElement.dataset.theme;
+  const [theme, setTheme] = useState(now);
+  useEffect(() => {
+    const change = () => setTheme(now());
+    addEventListener('themechange', change);
+    return () => removeEventListener('themechange', change);
+  }, []);
+  return theme;
+}
+
 const PATHS = { check: 'M20 6 9 17l-5-5', x: 'M18 6 6 18M6 6l12 12', plus: 'M5 12h14M12 5v14', play: 'M6 4l14 8-14 8z', trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13', load: 'M12 3a9 9 0 1 0 9 9', back: 'M15 18l-6-6 6-6', chat: 'M5 5h14v11h-8l-4 4v-4H5z', alert: 'M12 8v5M12 16.5v.01M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18' };
 export const Icon = ({ name }) => (
   <svg class={`icon ${name === 'load' ? 'spin' : ''}`} viewBox="0 0 24 24" aria-hidden="true">

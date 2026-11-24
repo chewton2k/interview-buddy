@@ -2,7 +2,7 @@ import { addProblem, data, obj, str, tracked } from './generate.js';
 import { dropLinks, findLinks } from './link.js';
 import { ask, ProviderError } from './providers.js';
 import { LANGUAGES, runCode } from './sandbox.js';
-import { checkDrawing, Invalid, readSet, readSettings, updateProblem } from './store.js';
+import { checkDrawing, Invalid, readSet, chosen, updateProblem } from './store.js';
 
 const RUNS = ['code', 'sql'];
 const HTML_LIMIT = 200000;
@@ -11,7 +11,7 @@ const need = (v, name, max) => {
   if (typeof v !== 'string' || v.length > max) throw new Invalid(`${name} must be text of at most ${max.toLocaleString('en-US')} characters`);
   return v;
 };
-const work = (b) => ({ language: need(b.language, 'Language', 20), code: need(b.code, 'Code', 100000), answer: need(b.answer, 'Answer', 1000), working: need(b.working, 'Your working', 100000), outcome: need(b.outcome, 'Outcome', 500), drawing: checkDrawing(b.drawing) });
+const work = (b) => ({ language: need(b.language, 'Language', 20), code: need(b.code, 'Code', 100000), answer: need(b.answer, 'Answer', 1000), working: need(b.working, 'Your working', 100000), outcome: need(b.outcome, 'Outcome', 6000), drawing: checkDrawing(b.drawing) });
 const seen = (drawing) => (drawing ? '\nThe attached image is the candidate\'s drawing, which is part of their work.' : '');
 const worded = ({ drawing, ...rest }) => ({ ...rest, drawing: drawing?.outline });
 const ready = (p) => {
@@ -23,6 +23,10 @@ const find = async (setId, pid) => {
   return { set, problem: set.problems.find((p) => p.id === pid) };
 };
 
+const PARTNER = `You are the candidate's interview partner for one practice problem. Answer their last message in the transcript.
+Be direct and concrete, refer to what they actually wrote, and keep to what was asked. Nudge rather than hand over the full solution unless they ask for it.`;
+const INTERVIEWER = `You are the interviewer in a live technical interview in a shared coding pad. You see the candidate's code and what their last run printed. Answer their last message in the transcript.
+Behave like a good human interviewer. Keep replies under 90 words. Ask at most one question at a time. Answer clarifying questions about the problem plainly. When they describe an approach, probe its edge cases and its time and space cost before they build it. When they are stuck or ask for help, give the smallest useful nudge. When their code works, ask for tests they would add, then a follow-up that changes a constraint. Never write the solution, name the full algorithm outright or fix their code for them. If they ask for the solution, say it opens when they finish the interview.`;
 const chatSchema = obj({ reply: str, new_problem: str });
 
 /** Stores the question and answers it in the background, so leaving the page loses nothing. */
@@ -46,11 +50,10 @@ export async function chat(setId, pid, body) {
   tracked(setId, async (job) => {
     try {
       const { problem } = await find(setId, pid);
-      const { tutor } = await readSettings();
-      const prompt = `You are the candidate's interview partner for one practice problem. Answer their last message in the transcript.
-Be direct and concrete, refer to what they actually wrote, and keep to what was asked. Nudge rather than hand over the full solution unless they ask for it. Use Markdown, with $...$ for math and fenced code where it helps. Never write a dollar sign for money.
+      const tutor = await chosen();
+      const prompt = `${RUNS.includes(problem.kind) && !problem.session?.endedAt ? INTERVIEWER : PARTNER} Use Markdown, with $...$ for math and fenced code where it helps. Never write a dollar sign for money.
 new_problem is an empty string unless the candidate asks you to make a new practice problem, for example from a link, an idea or as a variation of this one. Then describe the problem to write in a few self-contained sentences, with no links, and say in reply that it is being made. The app opens links the candidate pasted.
-${data({ problem: { title: problem.title, subject: problem.subject, ...known(problem.body) }, candidate_work: worded(now), transcript: problem.chat.slice(-20).map(({ role, text }) => ({ role, text })) })}${seen(now.drawing)}`;
+${data({ problem: { title: problem.title, subject: problem.subject, ...known(problem.body) }, candidate_work: worded(now), clock: problem.session ?? undefined, transcript: problem.chat.slice(-20).map(({ role, text }) => ({ role, text })) })}${seen(now.drawing)}`;
       const r = await ask({ ...tutor, prompt, images: now.drawing ? [now.drawing.png] : [], schema: chatSchema, signal: job.signal });
       // Links come from the candidate's own words only. A page or a reply must not be able to choose what gets opened.
       const problemId = r.new_problem.trim() ? await addProblem(setId, { request: question, guidance: dropLinks(r.new_problem), subject: '', links: findLinks(question) }) : undefined;
@@ -128,7 +131,7 @@ function draw(setId, pid, evidenceOf, fix, drawing) {
       const { problem } = await find(setId, pid);
       const evidence = await evidenceOf(problem);
       await put({ step: fix ? 'Fixing the drawing' : 'Drawing' });
-      const { tutor } = await readSettings();
+      const tutor = await chosen();
       const r = await ask({ ...tutor, prompt: visualPrompt(problem, brief(evidence), fix) + seen(drawing), images: drawing ? [drawing.png] : [], schema: visualSchema, signal: job.signal });
       if (!r.html.trim()) throw new ProviderError('badjson', 'The model did not return a drawing. Try again.');
       if (r.html.length > HTML_LIMIT) throw new ProviderError('badjson', 'The drawing was too large. Try again.');

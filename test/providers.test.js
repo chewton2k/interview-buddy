@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { calls, clearCalls, emptyPath, intake, brief, replies } from './stub/setup.js';
 import { ask, ping, PROVIDERS, providerStatus } from '../src/providers.js';
 import { planSchema, problemSchema, SUBJECTS, writeProblem } from '../src/generate.js';
-import { checkChoice, checkSettings } from '../src/store.js';
+import { checkSettings } from '../src/store.js';
 
 const schema = { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false };
 const go = (provider, extra) => ask({ provider, model: 'm-1', effort: 'low', prompt: 'hello', schema, ...extra });
@@ -66,11 +66,11 @@ test('status reports sign-in, version, models and a missing command', async () =
   assert.ok(saved.startsWith(emptyPath));
 });
 
-test('settings refuse unknown accounts, flag-like models and unknown efforts', () => {
-  const ok = { provider: 'codex', model: 'gpt-x', effort: '' };
-  assert.deepEqual(checkChoice(ok), ok);
-  for (const bad of [{ ...ok, provider: 'toString' }, { ...ok, model: '--dangerous' }, { ...ok, model: 'a b' }, { ...ok, model: 5 }, { ...ok, effort: 'ultra hard' }, null]) assert.throws(() => checkChoice(bad));
-  assert.throws(() => checkSettings({ write: ok }));
+test('settings refuse unknown accounts and flag-like models', () => {
+  const ok = { provider: 'codex', model: 'gpt-x' };
+  assert.deepEqual(checkSettings({ ...ok, effort: 'max' }), ok);
+  assert.deepEqual(checkSettings({ ...ok, model: '' }), { provider: 'codex', model: '' });
+  for (const bad of [{ ...ok, provider: 'toString' }, { ...ok, model: '--dangerous' }, { ...ok, model: 'a b' }, { ...ok, model: 5 }, null, 'x']) assert.throws(() => checkSettings(bad));
 });
 
 test('schemas are strict enough for codex', () => {

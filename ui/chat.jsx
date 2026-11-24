@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { api, Icon, Problem, Prose, useAction } from './lib.jsx';
 
-export function Chat({ setId, problem, at, work, reload, onClose }) {
+export function Chat({ setId, problem, at, work, reload, onClose, title = 'Ask', intro = 'Ask about the problem, your approach or a hint. It can see your current work. You can also paste a link and ask for a new problem.', placeholder = 'Ask anything about this problem' }) {
   const [text, setText] = useState('');
   const end = useRef();
   const list = problem.chat ?? [];
@@ -14,15 +14,17 @@ export function Chat({ setId, problem, at, work, reload, onClose }) {
   const busy = send.busy || problem.chatBusy;
   const go = () => text.trim() && !busy && send.run({ message: text });
   return (
-    <aside class="chat" aria-label="Ask about this problem">
+    <aside class="chat" aria-label={title}>
       <div class="row between">
-        <h2>Ask</h2>
-        <button class="btn bare" aria-label="Close ask" onClick={onClose}>
-          <Icon name="x" />
-        </button>
+        <h2>{title}</h2>
+        {onClose && (
+          <button class="btn bare" aria-label="Close ask" onClick={onClose}>
+            <Icon name="x" />
+          </button>
+        )}
       </div>
       <div class="talk" aria-live="polite">
-        {!list.length && <p class="second small">Ask about the problem, your approach or a hint. It can see your current work. You can also paste a link and ask for a new problem.</p>}
+        {!list.length && <p class="second small">{intro}</p>}
         {list.map((m, i) => (
           <div key={i} class={`said ${m.role}`}>
             <span class="sr">{m.role === 'user' ? 'You' : 'Reply'}</span>
@@ -60,9 +62,9 @@ export function Chat({ setId, problem, at, work, reload, onClose }) {
         <textarea
           class="input"
           aria-label="Your message"
-          rows={3}
+          rows={2}
           maxLength={4000}
-          placeholder="Ask anything about this problem"
+          placeholder={placeholder}
           value={text}
           onInput={(e) => setText(e.target.value)}
           onKeyDown={(e) => {

@@ -46,7 +46,7 @@ async function make(kind, reply) {
   clearCalls();
   return { id, pid: s.problems[0].id, at: `/sets/${id}/problems/${s.problems[0].id}` };
 }
-const said = (reply, new_problem = '') => ({ match: 'interview partner', reply: { reply, new_problem } });
+const said = (reply, new_problem = '') => ({ match: 'last message in the transcript', reply: { reply, new_problem } });
 const drawn = (html = '<p>hi</p>', extra) => ({ match: 'interactive picture', reply: { summary: 'sum', html }, ...extra });
 const block = async (fn) => {
   const check = PRIVATE.check;
@@ -78,7 +78,7 @@ test('chat sends the current work and transcript, keeps history and refuses over
 
 test('a failed reply keeps the question and can be sent again', async () => {
   const { id, at } = await make('code', code());
-  replies([{ match: 'interview partner', exit: 'usage limit reached' }]);
+  replies([{ match: 'last message in the transcript', exit: 'usage limit reached' }]);
   await call('POST', `${at}/chat`, { message: 'hello?' });
   let [p] = (await settled(id)).problems;
   assert.match(p.chatError, /usage limit/);
@@ -86,7 +86,7 @@ test('a failed reply keeps the question and can be sent again', async () => {
   await call('POST', `${at}/chat`, { retry: true });
   [p] = (await settled(id)).problems;
   assert.deepEqual([p.chat.length, p.chat[1].text, p.chatError], [2, 'Back', '']);
-  replies([{ match: 'interview partner', reply: { reply: 5 } }]);
+  replies([{ match: 'last message in the transcript', reply: { reply: 5 } }]);
   await call('POST', `${at}/chat`, { message: 'x' });
   assert.match((await settled(id)).problems[0].chatError, /reply\.reply/);
 });
@@ -172,6 +172,9 @@ test('analysis of Python uses the recorded run of the smallest failing test', as
   assert.equal(page.headers.get('access-control-allow-origin'), null);
   assert.match(page.headers.get('content-type'), /text\/html/);
   assert.ok(page.text.includes('<p id="x"></p>') && page.text.includes('stage-data'));
+  assert.match(page.text, /<html lang="en" data-theme="light">/);
+  assert.match((await call('GET', `${at}/visual?theme=dark`)).text, /data-theme="dark"/);
+  assert.match((await call('GET', `${at}/visual?theme="><script>`)).text, /data-theme="light">/);
 
   replies([drawn('<p>fixed</p>')]);
   clearCalls();
@@ -251,7 +254,7 @@ test('closing the app or deleting the set ends chat and analysis cleanly', async
   await recoverInterrupted();
   const [p] = (await readSet(id)).problems;
   assert.deepEqual([p.chatBusy, p.visual.status, p.status], [false, 'failed', 'ready']);
-  replies([{ match: 'interview partner', hang: true }, { match: 'interactive picture', hang: true }]);
+  replies([{ match: 'last message in the transcript', hang: true }, { match: 'interactive picture', hang: true }]);
   await call('POST', `${at}/chat`, { retry: true });
   await call('POST', `${at}/analyze`, { answer: '1' });
   await new Promise((r) => setTimeout(r, 300));
@@ -263,4 +266,21 @@ test('closing the app or deleting the set ends chat and analysis cleanly', async
 
 test('a blocked address list is in place by default', () => {
   assert.ok(PRIVATE instanceof net.BlockList && PRIVATE.check('127.0.0.1'));
+});
+
+test('the interviewer withholds the solution until the interview is finished, and grading sees the talk', async () => {
+  const { id, pid, at } = await make('code', code());
+  replies([said('What is the cost?')]);
+  await call('POST', `${at}/chat`, { message: 'I would sort first' });
+  await settled(id);
+  assert.match(calls()[0].prompt, /You are the interviewer/);
+  await call('POST', `${at}/session`, { action: 'end' });
+  clearCalls();
+  replies([said('Sure'), { match: 'Grade this', reply: { summary: 's', points: [{ mark: 'met', note: '' }, { mark: 'met', note: '' }] } }]);
+  await call('POST', `${at}/chat`, { message: 'show me' });
+  await settled(id);
+  assert.match(calls()[0].prompt, /interview partner/);
+  await call('POST', `${at}/feedback`, { answer: 'x', outcome: 'o' });
+  assert.ok(calls()[1].prompt.includes('I would sort first') && calls()[1].prompt.includes('interview_transcript'));
+  assert.ok(pid);
 });

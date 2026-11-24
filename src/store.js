@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { EFFORTS, MODEL_ID, PROVIDERS } from './providers.js';
+import { MODEL_ID, PROVIDERS } from './providers.js';
 
 export const home = () => process.env.INTERVIEW_BUDDY_HOME ?? path.join(os.homedir(), '.interview-buddy');
 const ID = /^[a-f0-9-]{36}$/;
@@ -103,23 +103,24 @@ export async function listSets() {
   return sets.filter(Boolean).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-const START = { provider: 'claude', model: 'sonnet', effort: '' };
-const DEFAULTS = { write: START, grade: START, tutor: { ...START, effort: 'medium' } };
+const START = { provider: 'claude', model: 'sonnet' };
 export async function readSettings() {
   try {
-    return checkSettings(await readJson(path.join(home(), 'settings.json')));
+    const saved = await readJson(path.join(home(), 'settings.json'));
+    // Files from before there was one model for everything kept one per job.
+    return checkSettings(saved.write ?? saved);
   } catch (e) {
-    if (e instanceof NotFound || e instanceof Invalid || e instanceof SyntaxError) return DEFAULTS;
+    if (e instanceof NotFound || e instanceof Invalid || e instanceof SyntaxError) return START;
     throw e;
   }
 }
-export function checkChoice(c, name = 'model') {
-  if (!c || typeof c !== 'object' || !Object.hasOwn(PROVIDERS, c.provider)) throw new Invalid(`Choose an account for ${name}`);
-  if (c.model !== '' && !(typeof c.model === 'string' && MODEL_ID.test(c.model))) throw new Invalid(`The model id for ${name} has characters that are not allowed`);
-  if (!EFFORTS.includes(c.effort)) throw new Invalid(`Choose an effort for ${name}`);
-  return { provider: c.provider, model: c.model, effort: c.effort };
+export function checkSettings(c) {
+  if (!c || typeof c !== 'object' || !Object.hasOwn(PROVIDERS, c.provider)) throw new Invalid('Choose Claude or Codex');
+  if (c.model !== '' && !(typeof c.model === 'string' && MODEL_ID.test(c.model))) throw new Invalid('The model id has characters that are not allowed');
+  return { provider: c.provider, model: c.model };
 }
-export const checkSettings = (s) => ({ write: checkChoice(s?.write, 'writing problems'), grade: checkChoice(s?.grade, 'grading answers'), tutor: checkChoice(s?.tutor ?? s?.grade, 'chat and analysis') });
+/** What every call uses. Medium keeps drawings accurate without the wait of higher settings. */
+export const chosen = async () => ({ ...(await readSettings()), effort: 'medium' });
 export async function saveSettings(s) {
   const clean = checkSettings(s);
   await writeJson(path.join(home(), 'settings.json'), clean);

@@ -1,14 +1,15 @@
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkNumber } from './answers.js';
 import { addProblem, checkRequest, createSet, grade, GROUPS, LEVELS, personalSet, retryProblem, retrySet, stopSet } from './generate.js';
-import { starter } from './harness.js';
+import { fits, same, starter } from './harness.js';
 import { findLinks } from './link.js';
 import { ping, ProviderError, providerStatus } from './providers.js';
-import { LANGUAGES, runCode, selfTest, tools } from './sandbox.js';
-import { checkChoice, checkDrawing, deleteSet, Invalid, listSets, NotFound, readDrawing, readSet, readSettings, saveDrawing, saveSettings, updateProblem } from './store.js';
+import { LANGUAGES, runCode, runProgram, selfTest, tools } from './sandbox.js';
+import { checkDrawing, checkSettings, deleteSet, Invalid, listSets, NotFound, readDrawing, readSet, readSettings, saveDrawing, saveSettings, updateProblem } from './store.js';
 import { analyze, chat, repair, visualOf } from './tutor.js';
 
 const DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
@@ -32,11 +33,11 @@ class Page {
 }
 
 /** The model-written analysis with its kit inlined. The policy gives it an opaque origin and no network. */
-async function framePage({ html, data }) {
+async function framePage({ html, data }, theme) {
   const [css, kit] = await Promise.all(['stage.css', 'stage.js'].map((f) => fs.readFile(path.join(DIST, f), 'utf8')));
   const json = JSON.stringify(data ?? {}).replace(/</g, '\\u003c');
   return new Page(
-    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Analysis</title><style>${css}</style></head><body><script type="application/json" id="stage-data">${json}</script><script>${kit.replace(/<\/script/gi, '<\\/script')}</script><div id="stage">${html}</div></body></html>`,
+    `<!doctype html><html lang="en" data-theme="${theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Analysis</title><style>${css}</style></head><body><script type="application/json" id="stage-data">${json}</script><script>${kit.replace(/<\/script/gi, '<\\/script')}</script><div id="stage">${html}</div></body></html>`,
     FRAME_CSP,
   );
 }
@@ -79,14 +80,59 @@ const kindOnly = (problem, ...kinds) => {
   if (!kinds.includes(problem.kind)) throw new Invalid('That does not apply to this kind of problem');
 };
 
-async function runFor(setId, pid, body, examplesOnly) {
-  const problem = await readyProblem(setId, pid);
+function languageFor(problem, body) {
   kindOnly(problem, 'code', 'sql');
   const language = problem.kind === 'sql' ? 'sql' : body.language;
   if (language !== 'sql' && !LANGUAGES.includes(language)) throw new Invalid('Choose a language');
+  return language;
+}
+
+async function runFor(setId, pid, body, examplesOnly) {
+  const problem = await readyProblem(setId, pid);
+  const language = languageFor(problem, body);
   const { signature, compare, cases, exampleCount } = problem.body;
-  const chosen = examplesOnly ? cases.slice(0, exampleCount) : cases;
-  return runCode({ language, code: needText(body.code, 'Code'), signature, cases: chosen, compare });
+  const given = cases.slice(0, examplesOnly ? exampleCount : undefined).map((c, i) => ({ args: c.args, expected: c.expected, label: i < exampleCount ? `Example ${i + 1}` : `Test ${i + 1}` }));
+  const own = (problem.tests ?? []).map((t, i) => ({ args: t.args, expected: t.expected, label: `Your test ${i + 1}`, own: true }));
+  const tests = [...given, ...own];
+  const r = await runCode({ language, code: needText(body.code, 'Code'), signature, cases: tests, compare });
+  return { ...r, tests };
+}
+
+const TESTS_LIMIT = 50;
+const readValue = (raw, type, name) => {
+  const t = needText(raw, name, 20000).trim();
+  let value;
+  try {
+    value = JSON.parse(t);
+  } catch {
+    if (type === 'string') return t;
+    throw new Invalid(`${name} must be written like ${type.endsWith('[]') ? '[1, 2, 3]' : type === 'bool' ? 'true' : '5'}`);
+  }
+  if (!fits(value, type)) throw new Invalid(`${name} must be of type ${type}`);
+  return value;
+};
+
+/** Saves a test the user wrote. Without an expected value, the reference solution fills it in. */
+async function addTest(setId, pid, body) {
+  const problem = await readyProblem(setId, pid);
+  kindOnly(problem, 'code', 'sql');
+  const { signature, compare, solutionCode } = problem.body;
+  if (!Array.isArray(body.args) || body.args.length !== signature.params.length) throw new Invalid('Fill in every input');
+  const args = signature.params.map((p, i) => readValue(body.args[i], p.type, p.name));
+  const written = needText(body.expected ?? '', 'Expected', 20000).trim();
+  const { results } = await runCode({ language: problem.kind === 'sql' ? 'sql' : 'python', code: solutionCode, signature, cases: [{ args }] });
+  const reference = results[0].status === 'pass' ? results[0].actual : undefined;
+  if (!written && reference === undefined) throw new Invalid(`The reference solution could not answer this input (${results[0].error}). Write the expected value yourself.`);
+  const expected = written ? readValue(written, signature.returns, 'Expected') : reference;
+  const test = { id: randomUUID(), args, expected };
+  // Both values are kept in view, because the reference can be wrong on inputs the statement rules out.
+  if (reference !== undefined && !same(expected, reference, compare)) test.reference = reference;
+  await updateProblem(setId, pid, (p) => {
+    p.tests ??= [];
+    if (p.tests.length >= TESTS_LIMIT) throw new Invalid(`You can keep up to ${TESTS_LIMIT} tests`);
+    p.tests.push(test);
+  });
+  return { test };
 }
 
 const routes = [
@@ -98,7 +144,7 @@ const routes = [
   }],
   ['PUT', /^\/api\/settings$/, async (_, body) => ({ settings: await saveSettings(body) })],
   ['POST', /^\/api\/settings\/test$/, async (_, body) => {
-    const r = await ping(checkChoice(body, 'this job'));
+    const r = await ping(checkSettings(body));
     if (r.ok !== true) throw new ProviderError('badjson', 'The model replied, but not as asked');
     return { ok: true };
   }],
@@ -108,7 +154,7 @@ const routes = [
   ['POST', /^\/api\/sets$/, async (_, body) => ({ id: (await createSet(body)).id })],
   ['GET', /^\/api\/sets\/([^/]+)$/, async ([id]) => {
     const set = await readSet(id);
-    for (const p of set.problems) if (p.body?.signature) p.starters = Object.fromEntries((p.kind === 'sql' ? ['sql'] : LANGUAGES).map((l) => [l, starter(l, p.body.signature)]));
+    for (const p of set.problems) if (p.body?.signature) p.starters = Object.fromEntries((p.kind === 'sql' ? ['sql'] : LANGUAGES).map((l) => [l, starter(l, p.body.signature, p.body.cases[0].args)]));
     for (const p of set.problems) {
       delete p.source;
       if (p.visual) for (const k of ['html', 'data']) delete p.visual[k];
@@ -123,10 +169,10 @@ const routes = [
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/chat$/, async ([id, pid], body) => (await chat(id, pid, body), {})],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/analyze$/, async ([id, pid], body) => (await analyze(id, pid, body), {})],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/analyze\/repair$/, async ([id, pid], body) => (await repair(id, pid, body), {})],
-  ['GET', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/visual$/, async ([id, pid]) => {
+  ['GET', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/visual$/, async ([id, pid], _, __, url) => {
     const visual = await visualOf(id, pid);
     if (!visual) throw new NotFound();
-    return framePage(visual);
+    return framePage(visual, url.searchParams.get('theme') === 'dark' ? 'dark' : 'light');
   }],
   ['DELETE', /^\/api\/sets\/([^/]+)$/, async ([id]) => {
     stopSet(id);
@@ -145,10 +191,37 @@ const routes = [
   }],
   ['GET', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/drawing$/, ([id, pid]) => readDrawing(id, pid)],
   ['PUT', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/drawing$/, async ([id, pid], body) => (await saveDrawing(id, pid, body.elements), {})],
+  ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/program$/, async ([id, pid], body) => {
+    const problem = await readyProblem(id, pid);
+    return runProgram({ language: languageFor(problem, body), code: needText(body.code, 'Code'), data: problem.body.cases[0].args[0] });
+  }],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/run$/, ([id, pid], body) => runFor(id, pid, body, true)],
+  ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/tests$/, async ([id, pid], body) => addTest(id, pid, body)],
+  ['DELETE', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/tests\/([^/]+)$/, async ([id, pid, tid]) => {
+    await updateProblem(id, pid, (p) => {
+      const left = (p.tests ?? []).filter((t) => t.id !== tid);
+      if (left.length === (p.tests ?? []).length) throw new NotFound();
+      p.tests = left;
+    });
+    return {};
+  }],
+  ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/session$/, async ([id, pid], body) => {
+    const problem = await readyProblem(id, pid);
+    kindOnly(problem, 'code', 'sql');
+    if (!['start', 'end', 'clear'].includes(body.action)) throw new Invalid('Choose start, end or clear');
+    if (body.action === 'start' && ![30, 45, 60].includes(body.minutes)) throw new Invalid('Choose 30, 45 or 60 minutes');
+    await updateProblem(id, pid, (p) => {
+      const now = new Date().toISOString();
+      if (body.action === 'start') p.session = { startedAt: now, endedAt: null, minutes: body.minutes };
+      else if (body.action === 'clear') p.session = null;
+      else p.session = { ...(p.session ?? { startedAt: null, minutes: null }), endedAt: now };
+    });
+    return {};
+  }],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/submit$/, async ([id, pid], body) => {
     const r = await runFor(id, pid, body, false);
-    await updateProblem(id, pid, advance(r.results.every((x) => x.status === 'pass')));
+    const given = r.tests.map((t, i) => (t.own ? null : r.results[i].status)).filter(Boolean);
+    await updateProblem(id, pid, advance(given.every((s) => s === 'pass')));
     return r;
   }],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/check$/, async ([id, pid], body) => {
@@ -170,7 +243,7 @@ const routes = [
     const answer = needText(body.answer, 'Your answer');
     const drawing = checkDrawing(body.drawing);
     if (!answer.trim() && !drawing) throw new Invalid('Write or draw an answer first');
-    const feedback = await grade({ problem, answer, drawing, outcome: needText(body.outcome ?? '', 'Outcome', 500), signal });
+    const feedback = await grade({ problem, answer, drawing, outcome: needText(body.outcome ?? '', 'Outcome', 6000), signal });
     await updateProblem(id, pid, (p) => {
       p.feedback = feedback;
       if (p.kind === 'written') advance(feedback.score >= 0.8)(p);
@@ -188,7 +261,7 @@ async function api(req, res, url) {
   const body = ['POST', 'PUT'].includes(req.method) ? await readBody(req) : undefined;
   const left = new AbortController();
   res.on('close', () => !res.writableFinished && left.abort());
-  return route.fn(route.m.slice(1), body, left.signal);
+  return route.fn(route.m.slice(1), body, left.signal, url);
 }
 
 async function asset(url) {

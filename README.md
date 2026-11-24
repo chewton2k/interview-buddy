@@ -8,7 +8,7 @@ It uses the Claude and ChatGPT sign-ins you already have through the `claude` an
 
 You need macOS, Node 22 or newer, Python 3, and at least one of:
 
-- ChatGPT through [Codex](https://developers.openai.com/codex/cli): `codex login`
+- Codex, with a ChatGPT account, from [Codex](https://developers.openai.com/codex/cli): `codex login`
 - Claude through [Claude Code](https://code.claude.com): `claude auth login`
 
 C++ also needs Apple's compiler, from `xcode-select --install`.
@@ -30,18 +30,19 @@ The command starts a server on `http://localhost:4747` and opens it in your brow
 3. Each problem is written and then checked on your computer before you see it.
 4. You answer, run the tests and ask for feedback.
 
-Choose the account, model and effort in Settings, separately for writing problems, grading answers, and chat and analysis.
+Choose Claude or Codex and a model in Settings. It is used for everything. Settings also has light and dark mode.
 
+- **A coding pad, not a quiz page.** Run executes your file and prints to a console. You write your own tests, talk to an interviewer who sees your code, and can start a clock. Hidden tests, hints, feedback and the solution open when you finish the interview.
 - **Write and draw.** Answers take text, equations you type and see typeset, and drawings on a whiteboard. Grading, chat and analysis see all three.
 - **Analyze** draws your own solution as an interactive picture. Python runs are recorded line by line, so the picture shows what your code really did. For other work the model draws it from your answer.
-- **Ask** opens a chat beside the problem. It sees your current work.
+- **Ask** opens a chat beside other problems. It sees your current work.
 - **Make a problem** turns a link or an idea into a problem, such as "https://... make this into a quant problem". It is on the home page, in every set, and in the chat.
 
 ## What is checked
 
 | Kind | Check before you see it | How your answer is judged |
 | --- | --- | --- |
-| Code (Python, JavaScript, C++) | Two different solutions run on every input and must agree with each other and with the examples. Expected outputs come from those runs. | Your code runs against every test |
+| Code (Python, JavaScript, C++) | Two different solutions run on every input and must agree with each other and with the examples. Expected outputs come from those runs. | Your code runs against every hidden test when you finish |
 | SQL (SQLite) | Two different queries must return the same rows on every dataset | Your query runs on every dataset |
 | Interface (HTML, CSS, JavaScript) | Checks must parse. In your browser, checks that fail on the reference solution or pass on the starting page are dropped. | The remaining checks run on your page, each on a fresh load |
 | Number | A separate solver must reach the stated answer | Your number is compared within a tolerance, in the stated unit |

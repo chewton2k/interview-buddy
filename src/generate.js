@@ -4,7 +4,7 @@ import { badSignature, close, fits, same, starter } from './harness.js';
 import { fetchPage } from './link.js';
 import { ask, ProviderError } from './providers.js';
 import { runCode, tools } from './sandbox.js';
-import { createSetFile, ensureSet, Invalid, listSets, readSet, readSettings, updateProblem, updateSet } from './store.js';
+import { createSetFile, ensureSet, Invalid, listSets, readSet, chosen, updateProblem, updateSet } from './store.js';
 
 export const GROUPS = {
   Engineering: ['Coding', 'System design', 'Frontend', 'SQL and data', 'Machine learning', 'Circuit design', 'Mechanical'],
@@ -270,10 +270,10 @@ async function generate(setId, pid, job) {
   if (brief?.status !== 'queued') return;
   const put = (patch) => updateProblem(setId, pid, (p) => void Object.assign(p, patch));
   try {
-    const { write } = await readSettings();
-    if (brief.request && !brief.kind) Object.assign(brief, await planOne(set.intake, brief, write, job.signal, put));
+    const choice = await chosen();
+    if (brief.request && !brief.kind) Object.assign(brief, await planOne(set.intake, brief, choice, job.signal, put));
     const { title, subject, kind, difficulty, topic, request, guidance, source } = brief;
-    const body = await writeProblem({ intake: set.intake, brief: { title, subject, kind, difficulty, topic, request, guidance, source }, choice: write, signal: job.signal, onStep: (step) => put({ status: 'writing', step }) });
+    const body = await writeProblem({ intake: set.intake, brief: { title, subject, kind, difficulty, topic, request, guidance, source }, choice, signal: job.signal, onStep: (step) => put({ status: 'writing', step }) });
     await put({ status: 'ready', step: null, error: null, body });
   } catch (e) {
     if (job.signal.aborted) return;
@@ -308,8 +308,8 @@ async function planAndRun(setId) {
   await tracked(setId, async (job) => {
     try {
       const { intake } = await readSet(setId);
-      const { write } = await readSettings();
-      const briefs = await turn(() => plan(intake, write, job.signal));
+      const choice = await chosen();
+      const briefs = await turn(() => plan(intake, choice, job.signal));
       const pids = await updateSet(setId, (s) => {
         s.status = 'ready';
         s.problems = briefs.map((b) => blank(b));
@@ -383,10 +383,10 @@ export async function recoverInterrupted() {
 }
 
 export async function grade({ problem, answer, outcome, drawing, signal }) {
-  const { grade: choice } = await readSettings();
+  const choice = await chosen();
   const { statement, rubric, solutionText, solutionCode, answer: correct, unit } = problem.body;
-  const prompt = `Grade this interview answer as a fair, specific interviewer. Give one entry in points for each of the ${rubric.length} rubric points, in order. mark is met, partial or missed. note is one or two sentences addressed to the candidate that point at what they wrote, and is empty when the point is fully met. summary is two sentences with the single most useful next step. Grade only what is written. Use $...$ for math.
-${data({ statement, rubric, reference: solutionCode ?? solutionText, correct_answer: correct === undefined ? undefined : `${correct} ${unit}`, outcome, candidate_answer: answer, candidate_drawing: drawing?.outline })}${drawing ? '\nThe attached image is the drawing that is part of their answer. Judge what it shows.' : ''}`;
+  const prompt = `Grade this interview answer as a fair, specific interviewer. Give one entry in points for each of the ${rubric.length} rubric points, in order. mark is met, partial or missed. note is one or two sentences addressed to the candidate that point at what they wrote, and is empty when the point is fully met. summary is two sentences with the single most useful next step. Grade only what is written. When there is an interview transcript, let summary also say how well they communicated, such as clarifying, explaining the approach and testing. Use $...$ for math.
+${data({ statement, rubric, reference: solutionCode ?? solutionText, correct_answer: correct === undefined ? undefined : `${correct} ${unit}`, outcome, candidate_answer: answer, candidate_drawing: drawing?.outline, interview_transcript: problem.chat?.slice(-30).map(({ role, text }) => ({ role: role === 'user' ? 'candidate' : 'interviewer', text })), clock: problem.session ?? undefined })}${drawing ? '\nThe attached image is the drawing that is part of their answer. Judge what it shows.' : ''}`;
   const g = await ask({ ...choice, prompt, schema: gradeSchema, images: drawing ? [drawing.png] : [], signal });
   if (g.points.length !== rubric.length) throw new ProviderError('badjson', 'The grader skipped part of the rubric. Try again.');
   const score = g.points.reduce((s, p) => s + (p.mark === 'met' ? 1 : p.mark === 'partial' ? 0.5 : 0), 0) / rubric.length;
