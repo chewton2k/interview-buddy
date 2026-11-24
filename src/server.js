@@ -1,0 +1,184 @@
+import fs from 'node:fs/promises';
+import http from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { checkNumber } from './answers.js';
+import { createSet, grade, LEVELS, retryProblem, retrySet, stopSet, SUBJECTS } from './generate.js';
+import { starter } from './harness.js';
+import { ping, ProviderError, providerStatus } from './providers.js';
+import { LANGUAGES, runCode, selfTest, tools } from './sandbox.js';
+import { checkChoice, deleteSet, Invalid, listSets, NotFound, readSet, readSettings, saveSettings, updateProblem } from './store.js';
+
+const DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.svg': 'image/svg+xml' };
+const CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+const BODY_LIMIT = 1 << 20;
+
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function readBody(req) {
+  if (!/^application\/json\b/.test(req.headers['content-type'] ?? '')) throw new HttpError(415, 'Send JSON');
+  let size = 0;
+  const chunks = [];
+  for await (const c of req) {
+    size += c.length;
+    if (size > BODY_LIMIT) throw new HttpError(413, 'That is larger than 1 MB');
+    chunks.push(c);
+  }
+  try {
+    const value = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    if (value && typeof value === 'object') return value;
+  } catch {}
+  throw new Invalid('The request was not valid JSON');
+}
+
+const needText = (v, name, max = 100000) => {
+  if (typeof v !== 'string' || v.length > max) throw new Invalid(`${name} must be text of at most ${max.toLocaleString('en-US')} characters`);
+  return v;
+};
+async function readyProblem(setId, pid) {
+  const set = await readSet(setId);
+  const problem = set.problems.find((p) => p.id === pid);
+  if (!problem) throw new NotFound();
+  if (problem.status !== 'ready') throw new Invalid('This problem is not ready yet');
+  return problem;
+}
+const advance = (solved) => (p) => {
+  if (p.progress !== 'solved') p.progress = solved ? 'solved' : 'tried';
+};
+const kindOnly = (problem, kind) => {
+  if (problem.kind !== kind) throw new Invalid('That does not apply to this kind of problem');
+};
+
+async function runFor(setId, pid, body, examplesOnly) {
+  const problem = await readyProblem(setId, pid);
+  kindOnly(problem, 'code');
+  if (!LANGUAGES.includes(body.language)) throw new Invalid('Choose a language');
+  const { signature, compare, cases, exampleCount } = problem.body;
+  const chosen = examplesOnly ? cases.slice(0, exampleCount) : cases;
+  return runCode({ language: body.language, code: needText(body.code, 'Code'), signature, cases: chosen, compare });
+}
+
+const routes = [
+  ['GET', /^\/api\/options$/, async () => ({ subjects: SUBJECTS, levels: LEVELS })],
+  ['GET', /^\/api\/settings$/, async () => ({ settings: await readSettings() })],
+  ['GET', /^\/api\/status$/, async () => {
+    const [providers, sandbox, found] = await Promise.all([providerStatus(), selfTest(), tools()]);
+    return { providers, sandbox, languages: { python: found.python?.version, javascript: found.javascript.version, cpp: found.cpp } };
+  }],
+  ['PUT', /^\/api\/settings$/, async (_, body) => ({ settings: await saveSettings(body) })],
+  ['POST', /^\/api\/settings\/test$/, async (_, body) => {
+    const r = await ping(checkChoice(body, 'this job'));
+    if (r.ok !== true) throw new ProviderError('badjson', 'The model replied, but not as asked');
+    return { ok: true };
+  }],
+  ['GET', /^\/api\/sets$/, async () => ({
+    sets: (await listSets()).map((s) => ({ id: s.id, createdAt: s.createdAt, company: s.intake.company, role: s.intake.role, level: s.intake.level, status: s.status, total: s.problems.length, solved: s.problems.filter((p) => p.progress === 'solved').length, quote: s.problems.find((p) => p.quote)?.quote ?? '' })),
+  })],
+  ['POST', /^\/api\/sets$/, async (_, body) => ({ id: (await createSet(body)).id })],
+  ['GET', /^\/api\/sets\/([^/]+)$/, async ([id]) => {
+    const set = await readSet(id);
+    for (const p of set.problems) if (p.body?.signature) p.starters = Object.fromEntries(LANGUAGES.map((l) => [l, starter(l, p.body.signature)]));
+    return { set };
+  }],
+  ['DELETE', /^\/api\/sets\/([^/]+)$/, async ([id]) => {
+    stopSet(id);
+    await deleteSet(id);
+    return {};
+  }],
+  ['POST', /^\/api\/sets\/([^/]+)\/retry$/, async ([id]) => (await retrySet(id), {})],
+  ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/retry$/, async ([id, pid]) => (await retryProblem(id, pid), {})],
+  ['PUT', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/draft$/, async ([id, pid], body) => {
+    const draft = {};
+    if (LANGUAGES.includes(body.language)) draft.language = body.language;
+    for (const l of LANGUAGES) if (body.code?.[l] !== undefined) (draft.code ??= {})[l] = needText(body.code[l], 'Code');
+    for (const k of ['answer', 'working']) if (body[k] !== undefined) draft[k] = needText(body[k], 'Your answer');
+    await updateProblem(id, pid, (p) => void (p.draft = draft));
+    return {};
+  }],
+  ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/run$/, ([id, pid], body) => runFor(id, pid, body, true)],
+  ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/submit$/, async ([id, pid], body) => {
+    const r = await runFor(id, pid, body, false);
+    await updateProblem(id, pid, advance(r.results.every((x) => x.status === 'pass')));
+    return r;
+  }],
+  ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/check$/, async ([id, pid], body) => {
+    const problem = await readyProblem(id, pid);
+    kindOnly(problem, 'numeric');
+    const correct = checkNumber(needText(body.answer, 'Your answer', 100), problem.body);
+    if (correct === null) throw new Invalid('Type a number such as 0.25, 1.2e-3, 1/4 or 25%');
+    await updateProblem(id, pid, advance(correct));
+    return { correct };
+  }],
+  ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/feedback$/, async ([id, pid], body, signal) => {
+    const problem = await readyProblem(id, pid);
+    const answer = needText(body.answer, 'Your answer');
+    if (!answer.trim()) throw new Invalid('Write an answer first');
+    const feedback = await grade({ problem, answer, outcome: needText(body.outcome ?? '', 'Outcome', 500), signal });
+    await updateProblem(id, pid, (p) => {
+      p.feedback = feedback;
+      if (p.kind === 'written') advance(feedback.score >= 0.8)(p);
+    });
+    return { feedback };
+  }],
+];
+
+const STATUS = { auth: 502, rate: 429, timeout: 504, missing: 502, exit: 502, badjson: 502, aborted: 499 };
+
+async function api(req, res, url) {
+  const matched = routes.map(([method, re, fn]) => ({ method, fn, m: url.pathname.match(re) })).filter((r) => r.m);
+  const route = matched.find((r) => r.method === req.method);
+  if (!route) throw new HttpError(matched.length ? 405 : 404, 'There is nothing at this address');
+  const body = ['POST', 'PUT'].includes(req.method) ? await readBody(req) : undefined;
+  const left = new AbortController();
+  res.on('close', () => !res.writableFinished && left.abort());
+  return route.fn(route.m.slice(1), body, left.signal);
+}
+
+async function asset(url) {
+  let name = 'index.html';
+  try {
+    if (url.pathname !== '/') name = decodeURIComponent(url.pathname.slice(1));
+  } catch {
+    throw new HttpError(400, 'Bad address');
+  }
+  const file = path.join(DIST, name);
+  const type = TYPES[path.extname(file)];
+  if (!file.startsWith(DIST + path.sep) || !type || name.includes('\0')) throw new HttpError(404, 'There is nothing at this address');
+  const content = await fs.readFile(file).catch(() => null);
+  if (!content) throw new HttpError(404, name === 'index.html' ? 'The page is not built. Run npm run build.' : 'There is nothing at this address');
+  return { content, type };
+}
+
+export function createServer() {
+  const server = http.createServer(async (req, res) => {
+    const headers = { 'content-security-policy': CSP, 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'cross-origin-resource-policy': 'same-origin', 'cache-control': 'no-store' };
+    const send = (status, type, content) => {
+      if (!res.headersSent) res.writeHead(status, { ...headers, 'content-type': type }).end(content);
+    };
+    try {
+      const { port } = server.address();
+      const hosts = [`localhost:${port}`, `127.0.0.1:${port}`];
+      if (!hosts.includes(req.headers.host)) throw new HttpError(403, 'Open Interview Buddy on localhost');
+      // A foreign page cannot forge Origin, so this keeps other sites from running code or spending the subscription.
+      if (req.method !== 'GET' && req.method !== 'HEAD' && !hosts.map((h) => `http://${h}`).includes(req.headers.origin)) throw new HttpError(403, 'Requests must come from Interview Buddy');
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      if (url.pathname.startsWith('/api/')) return send(200, 'application/json', JSON.stringify(await api(req, res, url)));
+      if (req.method !== 'GET') throw new HttpError(405, 'There is nothing at this address');
+      const { content, type } = await asset(url);
+      send(200, type, content);
+    } catch (e) {
+      const status = e.status ?? (e instanceof Invalid ? 400 : e instanceof NotFound ? 404 : e instanceof ProviderError ? STATUS[e.kind] : 500);
+      if (status === 500) console.error(e);
+      const message = status === 500 ? 'Something broke in Interview Buddy. The terminal has the details.' : e.message || 'This was not found. It may have been deleted.';
+      send(status, 'application/json', JSON.stringify({ error: message, kind: e.kind }));
+      if (status === 413) req.destroy();
+    }
+  });
+  return server;
+}
