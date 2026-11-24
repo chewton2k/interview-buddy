@@ -6,6 +6,7 @@ import { api, Icon, Line, Problem, Prose, useAction, useDebounced } from './lib.
 import { Feedback, Figure, show, Source, Values } from './parts.jsx';
 
 const LANGUAGES = { code: { python: 'Python', javascript: 'JavaScript', cpp: 'C++' }, sql: { sql: 'SQL' } };
+const FILES = { python: 'solution.py', javascript: 'solution.js', cpp: 'solution.cpp', sql: 'query.sql' };
 const INTRO = "I'm your interviewer. Read the instructions, ask me about anything unclear, and talk me through your approach before you write code.";
 
 function Splitter({ name, side, width, onWidth }) {
@@ -47,7 +48,7 @@ function Clock({ session, act, busy }) {
     const left = session.minutes * 60000 - (Math.max(now, Date.now()) - Date.parse(session.startedAt));
     return (
       <span class="clock" role="timer">
-        <span class={left < 0 ? 'bad' : ''}>{left < 0 ? `${span(-left)} over` : span(left)}</span>
+        <b class={left < 300000 ? 'mark on' : ''}>{left < 0 ? `${span(-left)} over` : span(left)}</b>
         <button class="btn bare" disabled={busy} onClick={() => act('clear')}>Stop clock</button>
       </span>
     );
@@ -58,7 +59,7 @@ function Clock({ session, act, busy }) {
       <select class="input" aria-label="Interview length" value={minutes} onChange={(e) => setMinutes(Number(e.target.value))}>
         {[30, 45, 60].map((m) => <option key={m} value={m}>{m} min</option>)}
       </select>
-      <button class="btn" disabled={busy} onClick={() => act('start', minutes)}>{session?.endedAt ? 'Start again' : 'Start clock'}</button>
+      <button class="btn" disabled={busy} onClick={() => act('start', minutes)}>{session?.endedAt ? 'Start again' : 'Start interview'}</button>
     </span>
   );
 }
@@ -281,28 +282,8 @@ export function Pad({ set, problem, at, load }) {
           <Icon name="back" />
           {set.intake.company}
         </a>
-        <span class="grow" />
         <Clock session={problem.session} act={clock.run} busy={clock.busy || busy} />
-        {Object.keys(languages).length > 1 && (
-          <select class="input" aria-label="Language" value={language} onChange={(e) => change(e.target.value, code)}>
-            {Object.entries(languages).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-          </select>
-        )}
-        <button
-          class="btn bare"
-          onClick={() => {
-            if (!confirm('Replace your code with the starting code?')) return;
-            change(language, { ...code, [language]: problem.starters[language] });
-            setResets(resets + 1);
-          }}
-        >
-          Reset
-        </button>
-        <button class="btn" disabled={busy} title="Command-Enter" onClick={() => run.run()}>
-          <Icon name="play" />
-          Run
-        </button>
-        <button class="btn primary" disabled={busy} onClick={() => finish.run()}>{ended ? 'Review again' : 'Finish interview'}</button>
+        <button class="btn stop" disabled={busy} onClick={() => finish.run()}>{ended ? 'Review again' : 'Finish interview'}</button>
       </div>
 
       <section class="padside" aria-label="Instructions">
@@ -313,7 +294,32 @@ export function Pad({ set, problem, at, load }) {
         {left === 'instructions' ? <Instructions set={set} problem={problem} /> : <Analysis problem={problem} at={at} analyze={analyze} reload={load} />}
       </section>
       <Splitter name="instructions" side="left" width={leftWidth} onWidth={(w) => (setLeftWidth(w), remember('pad-left', w))} />
-      <Editor key={`${language} ${resets}`} language={language} value={now} onChange={(text) => change(language, { ...code, [language]: text })} onRun={() => !busy && run.run()} />
+      <section class="padedit" aria-label="Your code">
+        <div class="padtabs">
+          <span class="mono">{FILES[language]}</span>
+          <span class="grow" />
+          {Object.keys(languages).length > 1 && (
+            <select class="input" aria-label="Language" value={language} onChange={(e) => change(e.target.value, code)}>
+              {Object.entries(languages).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+            </select>
+          )}
+          <button
+            class="btn bare"
+            onClick={() => {
+              if (!confirm('Replace your code with the starting code?')) return;
+              change(language, { ...code, [language]: problem.starters[language] });
+              setResets(resets + 1);
+            }}
+          >
+            Reset
+          </button>
+          <button class="btn run" disabled={busy} title="Command-Enter" onClick={() => run.run()}>
+            <Icon name="play" />
+            Run
+          </button>
+        </div>
+        <Editor key={`${language} ${resets}`} language={language} value={now} onChange={(text) => change(language, { ...code, [language]: text })} onRun={() => !busy && run.run()} />
+      </section>
       <Splitter name="output" side="right" width={rightWidth} onWidth={(w) => (setRightWidth(w), remember('pad-right', w))} />
 
       <div class="padright">
@@ -367,7 +373,7 @@ export function Pad({ set, problem, at, load }) {
             )}
           </div>
         </section>
-        <Chat title="Interviewer" intro={INTRO} placeholder="Talk to your interviewer" setId={set.id} problem={problem} at={at} work={work} reload={load} />
+        <Chat presence title="Interviewer" intro={INTRO} placeholder="Talk to your interviewer" setId={set.id} problem={problem} at={at} work={work} reload={load} />
       </div>
     </div>
   );

@@ -8,7 +8,7 @@ import { ask } from '../src/providers.js';
 import { checkDrawing, deleteSet, home, readDrawing, readSet, saveDrawing } from '../src/store.js';
 import { analyze, chat } from '../src/tutor.js';
 import { toBlocks, toMarkdown } from '../ui/blocks.js';
-import { outline } from '../ui/outline.js';
+import { outline, shapeAt } from '../ui/outline.js';
 
 const png = fs.readFileSync(new URL('./stub/dot.png', import.meta.url)).toString('base64');
 const drawing = { png, outline: 'rectangle "API"' };
@@ -47,6 +47,23 @@ test('a drawing is described by its shapes and connections', () => {
   ];
   assert.equal(outline(els), 'rectangle "API"\nellipse "Queue"\narrow from "API" to "Queue" labelled "writes"\nline from nothing to nothing\ntext "note"\nfreehand strokes');
   assert.equal(outline([]), '');
+});
+
+test('a click inside a shape finds the smallest one around it', () => {
+  const shape = (id, type, x, y, width, height, more) => ({ id, type, x, y, width, height, angle: 0, isDeleted: false, locked: false, ...more });
+  const at = (list, x, y) => shapeAt(list, { x, y })?.id;
+  const nested = [shape('inner', 'rectangle', 40, 40, 20, 20), shape('outer', 'rectangle', 0, 0, 100, 100)];
+  assert.equal(at(nested, 50, 50), 'inner');
+  assert.equal(at(nested, 5, 5), 'outer');
+  assert.equal(at(nested, 101, 50), undefined);
+  assert.equal(at([shape('d', 'diamond', 0, 0, 100, 100)], 10, 10), undefined);
+  assert.equal(at([shape('d', 'diamond', 0, 0, 100, 100)], 50, 10), 'd');
+  assert.equal(at([shape('e', 'ellipse', 0, 0, 100, 100)], 5, 5), undefined);
+  assert.equal(at([shape('e', 'ellipse', 0, 0, 100, 100)], 20, 20), 'e');
+  const tall = [shape('r', 'rectangle', 40, 0, 20, 100, { angle: Math.PI / 2 })];
+  assert.equal(at(tall, 5, 50), 'r');
+  assert.equal(at(tall, 50, 5), undefined);
+  assert.equal(at([shape('l', 'rectangle', 0, 0, 9, 9, { locked: true }), shape('x', 'rectangle', 0, 0, 9, 9, { isDeleted: true }), shape('a', 'arrow', 0, 0, 9, 9)], 4, 4), undefined);
 });
 
 test('drawings are saved beside the set, checked and deleted with it', async () => {

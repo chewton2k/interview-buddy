@@ -21,3 +21,14 @@ export function outline(elements) {
   }
   return lines.join('\n').slice(0, 8000);
 }
+
+/** The smallest unlocked box, diamond or ellipse around a point. */
+export function shapeAt(elements, { x, y }) {
+  const reach = { rectangle: Math.max, diamond: (a, b) => a + b, ellipse: Math.hypot };
+  const around = (e) => {
+    const [dx, dy] = [x - e.x - e.width / 2, y - e.y - e.height / 2];
+    const [cos, sin] = [Math.cos(-e.angle), Math.sin(-e.angle)];
+    return reach[e.type]?.(Math.abs(dx * cos - dy * sin) / (e.width / 2), Math.abs(dx * sin + dy * cos) / (e.height / 2)) <= 1;
+  };
+  return elements.filter((e) => !e.isDeleted && !e.locked && around(e)).sort((a, b) => a.width * a.height - b.width * b.height)[0];
+}

@@ -2,7 +2,7 @@
 // Loaded only when someone draws. The canvas is React, the rest of the page is Preact, so it gets its own root.
 import { Excalidraw, exportToBlob } from '@excalidraw/excalidraw';
 import { createRoot } from 'react-dom/client';
-import { outline } from './outline.js';
+import { outline, shapeAt } from './outline.js';
 
 const sheet = document.createElement('link');
 Object.assign(sheet, { rel: 'stylesheet', href: '/canvas.css' });
@@ -23,13 +23,28 @@ export async function snapshot(elements) {
   return { png: await base64(blob), outline: outline(elements) };
 }
 
-export async function mount(host, { elements, dark, onChange }) {
+export async function mount(host, { elements, onChange }) {
   await styled;
   const root = createRoot(host);
+  let canvas;
+  // A shape without a fill can only be picked by its edge, so a click inside it picks it here, after the canvas has handled the click.
+  const pickInside = (tool, { origin, drag }) => {
+    if (tool.type !== 'selection' || drag.hasOccurred) return;
+    setTimeout(() => {
+      const { selectedElementIds, editingTextElement } = canvas.getAppState();
+      const shape = !editingTextElement && !Object.keys(selectedElementIds).length && shapeAt(canvas.getSceneElements(), origin);
+      if (!shape) return;
+      const group = shape.groupIds.at(-1);
+      const picked = group ? canvas.getSceneElements().filter((e) => e.groupIds.includes(group)) : [shape];
+      canvas.updateScene({ appState: { selectedElementIds: Object.fromEntries(picked.map((e) => [e.id, true])), selectedGroupIds: group ? { [group]: true } : {} } });
+    });
+  };
   root.render(
     <Excalidraw
-      initialData={{ elements, scrollToContent: true, appState: { currentItemFontFamily: 2, currentItemRoughness: 0 } }}
-      theme={dark ? 'dark' : 'light'}
+      initialData={{ elements, scrollToContent: true, appState: { viewBackgroundColor: '#f7f7f4', currentItemFontFamily: 2, currentItemRoughness: 0 } }}
+      theme="light"
+      excalidrawAPI={(api) => (canvas = api)}
+      onPointerUp={pickInside}
       autoFocus={false}
       UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false, export: false, toggleTheme: false }, tools: { image: false } }}
       onChange={(list) => onChange(list.filter((e) => !e.isDeleted))}

@@ -2,13 +2,13 @@
   color-scheme: light;
   --card: #ffffff; --raised: #f4f4f5; --text: #171717; --second: #525252; --muted: #696969; --line: rgb(23 23 23 / 0.12);
   --mark: #ffe45c; --mark-soft: #fff3b0; --blue: #1d4ed8; --green: #15803d; --red: #b91c1c; --orange: #b45309; --teal: #0f766e; --ink: #171717; --on-ink: #ffffff;
-  --code-keyword: #8b1fa9; --code-function: #0b53c1; --code-variable: #8a4100; --code-type: #00695f; --code-string: #1f6b2b; --code-number: #b3261e; --code-property: #6b5200; --code-comment: #696969; --code-operator: #4a4a4a;
+  --code-keyword: #0000ff; --code-control: #af00db; --code-function: #795e26; --code-variable: #0b5394; --code-type: #0f766e; --code-string: #a31515; --code-number: #087a50; --code-property: #6b3fd4; --code-comment: #4f7350; --code-operator: #3b3f46; --code-bracket-1: #0431fa; --code-bracket-2: #2b7a2b; --code-bracket-3: #7b3814;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --card: #19191b; --raised: #232325; --text: #ededed; --second: #a1a1a6; --muted: #8e8e94; --line: rgb(237 237 237 / 0.14);
-  --mark: #f2d64b; --mark-soft: #574d18; --blue: #8ab4ff; --green: #4cc38a; --red: #ff7b7f; --orange: #f0b065; --teal: #5cc8bd; --ink: #ededed; --on-ink: #171717;
-  --code-keyword: #d8a0ff; --code-function: #7cc4ff; --code-variable: #f0c08a; --code-type: #5fd7c4; --code-string: #9bd88a; --code-number: #ff9d8a; --code-property: #e8e38c; --code-comment: #9a9aa2; --code-operator: #c9c9d1;
+  --card: #282c32; --raised: #3a3f47; --text: #f1f2f4; --second: #bcc2cb; --muted: #a3aab5; --line: rgb(237 240 245 / 0.16);
+  --mark: #f2d64b; --mark-soft: #574d18; --blue: #8ab4ff; --green: #34d578; --red: #ff8a8d; --orange: #f0b065; --teal: #5cc8bd; --ink: #ededed; --on-ink: #171717;
+  --code-keyword: #63b3ff; --code-control: #d896d4; --code-function: #e6e3a8; --code-variable: #9cdcfe; --code-type: #56d6bd; --code-string: #e39d7f; --code-number: #b9dba6; --code-property: #b9b6ff; --code-comment: #93b884; --code-operator: #d7dae0; --code-bracket-1: #ffd700; --code-bracket-2: #e48be0; --code-bracket-3: #4fc1ff;
 }
 * { box-sizing: border-box; }
 body { margin: 0; padding: 4px 0 32px; background: var(--card); color: var(--text); font: 400 16px/24px "Atkinson Hyperlegible Next Variable", system-ui, sans-serif; -webkit-font-smoothing: antialiased; overflow-wrap: anywhere; }
@@ -47,7 +47,7 @@ mark { background: var(--mark-soft); color: inherit; padding: 1px 2px; border-ra
 .stage-code li { counter-increment: line; display: flex; line-height: 22px; transition: background-color 140ms ease-out; }
 .stage-code li::before { content: counter(line); width: 40px; padding-right: 12px; text-align: right; color: var(--muted); flex: none; font-size: 12px; font-variant-numeric: tabular-nums; }
 .stage-code code { white-space: pre-wrap; padding-right: 12px; }
-.stage-code .k { color: var(--code-keyword); font-weight: 600; }
+.stage-code .k { color: var(--code-keyword); }
 .stage-code .f { color: var(--code-function); }
 .stage-code .s { color: var(--code-string); }
 .stage-code .d { color: var(--code-number); }

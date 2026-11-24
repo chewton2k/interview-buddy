@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { api, Icon, Problem, Prose, useAction } from './lib.jsx';
 
-export function Chat({ setId, problem, at, work, reload, onClose, title = 'Ask', intro = 'Ask about the problem, your approach or a hint. It can see your current work. You can also paste a link and ask for a new problem.', placeholder = 'Ask anything about this problem' }) {
+export function Chat({ setId, problem, at, work, reload, onClose, presence, title = 'Ask', intro = 'Ask about the problem, your approach or a hint. It can see your current work. You can also paste a link and ask for a new problem.', placeholder = 'Ask anything about this problem' }) {
   const [text, setText] = useState('');
   const end = useRef();
   const list = problem.chat ?? [];
@@ -17,6 +17,7 @@ export function Chat({ setId, problem, at, work, reload, onClose, title = 'Ask',
     <aside class="chat" aria-label={title}>
       <div class="row between">
         <h2>{title}</h2>
+        {presence && <span class={`presence ${problem.chatBusy ? 'typing' : ''}`}><i />{problem.chatBusy ? 'Typing' : 'Listening'}</span>}
         {onClose && (
           <button class="btn bare" aria-label="Close ask" onClick={onClose}>
             <Icon name="x" />

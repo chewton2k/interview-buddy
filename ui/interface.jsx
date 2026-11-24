@@ -101,7 +101,7 @@ export function InterfaceWork({ problem, at, work, analyze, Feedback }) {
           Reset
         </button>
         <span class="grow" />
-        <button class="btn" title="Command-Enter" onClick={show}>
+        <button class="btn run" title="Command-Enter" onClick={show}>
           <Icon name="play" />
           Run
         </button>
