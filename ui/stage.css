@@ -18,6 +18,7 @@ h2 { font-size: 20px; line-height: 28px; font-weight: 500; }
 h3 { font-size: 16px; line-height: 24px; font-weight: 500; }
 svg { display: block; max-width: 100%; height: auto; }
 svg text { font-family: inherit; }
+svg text.halo { paint-order: stroke; stroke: var(--card); stroke-width: 4px; stroke-linejoin: round; }
 #stage :not(code, pre, code *, pre *, math, math *) { font-family: "Atkinson Hyperlegible Next Variable", system-ui, sans-serif !important; }
 code, pre { font-family: "Atkinson Hyperlegible Mono Variable", ui-monospace, monospace; font-size: 14px; }
 :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }

@@ -168,6 +168,8 @@ a.item:hover, .over .item { background: var(--well); }
 .prose table { border-collapse: collapse; display: block; overflow-x: auto; }
 .prose td, .prose th { border: 1px solid var(--line); padding: 4px 12px; text-align: left; }
 .katex { font-size: 1.08em; }
+.prose td, .prose th { overflow-wrap: normal; min-width: 104px; }
+.prose td code { white-space: nowrap; }
 .prose .katex-display { overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
 .figure { background: #ffffff; border: 1px solid var(--line); border-radius: 8px; padding: 16px; display: block; max-width: 100%; max-height: 360px; width: 100%; object-fit: contain; }
 .example { border-left: 2px solid var(--line); padding-left: 16px; display: grid; gap: 4px; }
@@ -189,7 +191,7 @@ math-field:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; 
 .work.interface { grid-template-rows: auto minmax(200px, 5fr) minmax(240px, 6fr); }
 .offstage { position: absolute; left: -4000px; top: 0; width: 1000px; height: 700px; border: 0; }
 .preview-frame { width: 100%; height: 280px; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; resize: vertical; }
-.canvas .excalidraw { --color-primary: var(--ink); --color-primary-darker: var(--ink); --color-primary-darkest: var(--ink); --color-primary-hover: var(--ink-hover); --color-primary-light: var(--raised); --color-primary-light-darker: var(--line); --color-surface-primary-container: var(--raised); --color-on-primary-container: var(--text); --color-surface-low: var(--raised); --color-brand-hover: var(--ink-hover); --color-brand-active: var(--ink); --color-selection: var(--focus); --color-surface-high: var(--raised); }
+.canvas .excalidraw, .canvas .excalidraw.theme--dark { --color-primary: var(--ink); --color-primary-darker: var(--ink); --color-primary-darkest: var(--ink); --color-primary-hover: var(--ink-hover); --color-primary-light: var(--raised); --color-primary-light-darker: var(--line); --color-surface-primary-container: var(--raised); --color-on-primary-container: var(--text); --color-surface-low: var(--raised); --color-brand-hover: var(--ink-hover); --color-brand-active: var(--ink); --color-selection: var(--focus); --color-surface-high: var(--raised); }
 .canvas .excalidraw .default-sidebar-trigger, .canvas .excalidraw .sidebar-trigger { display: none; }
 .draw { display: grid; gap: 8px; }
 .canvas { height: max(420px, calc(100vh - 360px)); border: 1px solid var(--line-strong); border-radius: 12px; overflow: hidden; }
