@@ -213,8 +213,8 @@ int main() {
 }
 `;
 
-const SQL_WRAP = (sql) => `import json, sqlite3
-SQL = json.loads(${JSON.stringify(JSON.stringify(sql)).replace(/[\u007f-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)})
+const SQL_WRAP = (sql) => `import base64, sqlite3
+SQL = base64.b64decode("${Buffer.from(sql).toString('base64')}").decode()
 def _text(v):
     if v is None: return "NULL"
     if isinstance(v, float): return str(int(v)) if v == int(v) else format(v, ".6g")

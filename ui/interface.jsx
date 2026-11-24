@@ -31,39 +31,52 @@ const runCheck = (html, check) =>
     };
     const timer = setTimeout(() => finish({ name: check.name, ok: false, error: 'The page did not finish loading' }), 8000);
     document.body.append(frame);
-    const close = open(frame, html, [check], ([r]) => finish(r));
+    // The page under test shares the frame, so only a well-formed answer counts.
+    const close = open(frame, html, [check], (r) => finish(typeof r?.[0]?.ok === 'boolean' ? { name: check.name, ok: r[0].ok, error: r[0].error && String(r[0].error) } : { name: check.name, ok: false, error: 'The page did not report back' }));
   });
-const runChecks = (html, checks) => Promise.all(checks.map((c) => runCheck(html, c)));
+async function runChecks(html, checks) {
+  const focused = document.activeElement;
+  const results = [];
+  for (let i = 0; i < checks.length; i += 3) results.push(...(await Promise.all(checks.slice(i, i + 3).map((c) => runCheck(html, c)))));
+  focused?.focus?.();
+  return results;
+}
+/** Good checks pass on the reference and fail on the starting page. A failure is tried once more alone, in case the computer was busy. */
+async function goodChecks({ checks, solutionCode, starter }) {
+  const [solved, start] = [await runChecks(solutionCode, checks), await runChecks(starter, checks)];
+  for (let i = 0; i < checks.length; i++) if (!solved[i].ok) solved[i] = await runCheck(solutionCode, checks[i]);
+  return checks.filter((_, i) => solved[i].ok && !start[i].ok);
+}
 
 function Preview({ html }) {
   const frame = useRef();
-  useEffect(() => open(frame.current, html, [], () => {}), [html]);
-  return <iframe ref={frame} title="Preview" class="preview-frame" {...ALLOW} />;
+  useEffect(() => open(frame.current, html, [], () => {}), []);
+  return <iframe ref={frame} title="Preview" class="preview-frame" sandbox={ALLOW.sandbox} />;
 }
 
-/** Build an interface in HTML with a live preview and tests that run in the page. */
+/** Build an interface in HTML with a preview and tests that run in the page. */
 export function InterfaceWork({ problem, at, work, analyze, Feedback }) {
   const { body, draft } = problem;
   const [html, setHtml] = useState(draft.code?.html ?? body.starter);
-  const [live, setLive] = useState(html);
+  // Nothing runs until asked, so a page that hangs cannot lock anyone out of the problem.
+  const [live, setLive] = useState(null);
   const [tests, setTests] = useState(null);
   const [shown, setShown] = useState(null);
   const [feedback, setFeedback] = useState(problem.feedback);
   const [resets, setResets] = useState(0);
   const save = useDebounced((d) => api('PUT', `${at}/draft`, d).catch(() => {}), 600);
-  const refresh = useDebounced(setLive, 500);
-  // A check that fails on the reference solution is a bad check, so it is never shown.
   useEffect(() => {
     let gone = false;
-    runChecks(body.solutionCode, body.checks).then((r) => gone || setTests(body.checks.filter((_, i) => r[i].ok)));
+    goodChecks(body).then((good) => gone || setTests(good));
     return () => (gone = true);
   }, []);
   const change = (h) => {
     setHtml(h);
     save({ language: 'html', code: { html: h } });
-    refresh(h);
   };
+  const show = () => setLive({ html, n: (live?.n ?? 0) + 1 });
   const submit = useAction(async () => {
+    show();
     const results = await runChecks(html, tests);
     setShown({ html, results });
     await api('POST', `${at}/checked`, { passed: results.filter((r) => r.ok).length, total: results.length });
@@ -87,12 +100,16 @@ export function InterfaceWork({ problem, at, work, analyze, Feedback }) {
           Reset
         </button>
         <span class="grow" />
+        <button class="btn" title="Command-Enter" onClick={show}>
+          <Icon name="play" />
+          Run
+        </button>
         <button class="btn primary" disabled={!tests?.length || submit.busy} onClick={() => submit.run()}>Submit</button>
       </div>
-      <Editor key={resets} language="html" value={html} onChange={change} onRun={() => tests?.length && !submit.busy && submit.run()} />
+      <Editor key={resets} language="html" value={html} onChange={change} onRun={show} />
       <div class="results">
         <div class="stack">
-          <Preview html={live} />
+          {live ? <Preview key={live.n} html={live.html} /> : <p class="second">Run to see your page</p>}
           <Problem>{ask.error || submit.error}</Problem>
           <div class="row between wrap" aria-live="polite">
             {submit.busy ? (

@@ -57,7 +57,7 @@ const rejected = {
   'string outside ASCII': { params: [{ name: 'x', type: 'string' }], case_args_json: ['["h\u00e9"]'] },
   'result outside ASCII': { returns: 'string', examples: [{ args_json: '[65]', expected_json: '"A"', explanation: '' }, { args_json: '[66]', expected_json: '"B"', explanation: '' }], case_args_json: ['[67]', '[68]', '[69]', '[70]', '[233]'], solution_python: 'def twice(x):\n    return chr(x)', brute_python: 'def twice(x):\n    return bytes([x]).decode("latin1")' },
   'name that C++ reserves': { function_name: 'compl', solution_python: 'def compl(x):\n    return x * 2', brute_python: 'def compl(x):\n    return x + x' },
-  'name that C++ already defines': { function_name: 'abs', solution_python: 'def abs(x):\n    return x * 2', brute_python: 'def abs(x):\n    return x + x' },
+  'name that C++ already defines': { function_name: 'errno', solution_python: 'def errno(x):\n    return x * 2', brute_python: 'def errno(x):\n    return x + x' },
   'non-text hint': { hints: [1, 2, 3] },
   'huge input': { params: [{ name: 'x', type: 'string' }], case_args_json: [JSON.stringify(['x'.repeat(20001)])] },
 };

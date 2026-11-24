@@ -184,6 +184,18 @@ test('analysis of Python uses the recorded run of the smallest failing test', as
   assert.ok(!(await call('GET', `${at}/visual`)).text.includes('<script>alert(1)'));
 });
 
+test('a failed repair is not tried again', async () => {
+  const { id, at } = await make('numeric', numeric());
+  replies([drawn()]);
+  await call('POST', `${at}/analyze`, { answer: '1' });
+  await settled(id);
+  replies([{ match: 'interactive picture', exit: 'usage limit' }]);
+  await call('POST', `${at}/analyze/repair`, { error: 'boom' });
+  const { visual } = (await settled(id)).problems[0];
+  assert.ok(visual.status === 'ready' && visual.repaired);
+  assert.equal((await call('POST', `${at}/analyze/repair`, { error: 'boom' })).status, 400);
+});
+
 test('analysis covers a correct run, other languages, broken code and other kinds', async () => {
   const { id, at } = await make('code', code());
   const run = async (body) => {

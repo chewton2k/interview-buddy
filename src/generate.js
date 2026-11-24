@@ -14,7 +14,7 @@ export const GROUPS = {
 };
 export const SUBJECTS = Object.values(GROUPS).flat();
 const KINDS = ['code', 'numeric', 'written', 'ui', 'sql'];
-const KIND_GUIDE = 'kind is "code" for a function the candidate writes and runs against tests in Python, JavaScript or C++, "sql" for one SQLite query run against several datasets, "ui" for an interface built in HTML, CSS and JavaScript with a live preview and checks, "numeric" for one number as the answer, and "written" for design, derivation, explanation, critique, a case or a story that a rubric grades. In written problems the candidate can write, typeset equations and draw diagrams or wireframes.';
+const KIND_GUIDE = 'kind is "code" for a function the candidate writes and runs against tests in Python, JavaScript or C++, "sql" for one SQLite query run against several datasets, "ui" for an interface built in HTML, CSS and JavaScript with a preview and checks, "numeric" for one number as the answer, and "written" for design, derivation, explanation, critique, a case or a story that a rubric grades. In written problems the candidate can write, typeset equations and draw diagrams or wireframes.';
 export const LEVELS = ['Intern', 'New grad', 'Mid', 'Senior'];
 const TYPES = 'int, float, string, bool, and lists of them written int[], string[][] and so on, up to three levels deep';
 const MAX_TRIES = 3;

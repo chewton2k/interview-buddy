@@ -134,7 +134,7 @@ function draw(setId, pid, evidenceOf, fix, drawing) {
       await put({ status: 'ready', step: null, error: '', data: evidence, summary: r.summary, html: r.html, recorded: evidence.trace?.length ? (evidence.trace_cut ? 'start' : 'all') : '', repaired: Boolean(fix), version: Date.now() });
     } catch (e) {
       if (job.signal.aborted) return;
-      await updateProblem(setId, pid, (p) => void Object.assign(p.visual, { status: p.visual.html ? 'ready' : 'failed', step: null, error: e.message }));
+      await updateProblem(setId, pid, (p) => void Object.assign(p.visual, { status: p.visual.html ? 'ready' : 'failed', step: null, error: e.message, ...(fix && { repaired: true }) }));
     }
   });
 }

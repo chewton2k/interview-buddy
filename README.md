@@ -40,7 +40,7 @@ Choose the account, model and effort in Settings, separately for writing problem
 | --- | --- | --- |
 | Code (Python, JavaScript, C++) | Two different solutions run on every input and must agree with each other and with the examples. Expected outputs come from those runs. | Your code runs against every test |
 | SQL (SQLite) | Two different queries must return the same rows on every dataset | Your query runs on every dataset |
-| Interface (HTML, CSS, JavaScript) | Checks must parse. In your browser, checks that fail on the reference solution are dropped. | The remaining checks run on your page, each on a fresh load |
+| Interface (HTML, CSS, JavaScript) | Checks must parse. In your browser, checks that fail on the reference solution or pass on the starting page are dropped. | The remaining checks run on your page, each on a fresh load |
 | Number | A separate solver must reach the stated answer | Your number is compared within a tolerance, in the stated unit |
 | Written | Nothing is executed | A model grades it against a rubric |
 

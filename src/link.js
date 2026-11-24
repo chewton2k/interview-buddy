@@ -75,7 +75,7 @@ const SKIP = new Set(['script', 'style', 'noscript', 'svg', 'head', 'nav', 'foot
 const BREAK = new Set(['br', 'p', 'div', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'tr', 'pre']);
 // One forward scan, so a hostile page cannot stall the server with a slow pattern.
 export function htmlToText(html) {
-  const lower = html.toLowerCase();
+  const lower = html.replace(/[A-Z]+/g, (s) => s.toLowerCase());
   const after = (s, from) => {
     const at = lower.indexOf(s, from);
     return at < 0 ? html.length : at + s.length;

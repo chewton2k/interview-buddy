@@ -58,6 +58,7 @@ test('hostile pages are read in linear time', () => {
     htmlToText(s.repeat(250000));
     assert.ok(performance.now() - start < 1500, s);
   }
+  assert.equal(htmlToText('<P>\u0130\u0130\u0130</P><SCRIPT>x</SCRIPT><p>Hello <b>world</b></p>'), '\u0130\u0130\u0130\nHello world');
   assert.equal(htmlToText('a <b>bold</b> 1 < 2 <script>x<b></script>c<br/>d<!-- <p> -->e<SCRIPT>y'), 'a bold 1 < 2 c\nde');
 });
 

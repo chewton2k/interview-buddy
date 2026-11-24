@@ -25,10 +25,10 @@ async function made() {
 test('equations and text survive the editor', () => {
   const md = 'First $x$\nline\n\n$$\\frac{a}{b}$$\n\nthen';
   assert.deepEqual(toBlocks(md).map((b) => [b.type, b.text]), [['text', 'First $x$\nline'], ['math', '\\frac{a}{b}'], ['text', 'then']]);
-  for (const s of [md, '', 'plain', '$$x$$', '$$a$$\n\n$$b$$', 'costs $5 and $6', 'a\n\nb']) assert.equal(toMarkdown(toBlocks(s)), s, s);
+  for (const s of [md, '', 'plain', '$$x$$', '$$a$$\n\n$$b$$', 'costs $5 and $6', 'a\n\nb', 'inline $$b$$ stays', 'row \\\\[2pt] break']) assert.equal(toMarkdown(toBlocks(s)), s, s);
   assert.deepEqual(toBlocks('\\[y^2\\]').map((b) => b.type), ['math']);
   assert.equal(toMarkdown([{ type: 'math', text: ' ' }, { type: 'text', text: '' }]), '');
-  assert.equal(new Set(toBlocks('a $$b$$ c').map((b) => b.id)).size, 3);
+  assert.equal(new Set(toBlocks('a\n$$b$$\nc').map((b) => b.id)).size, 3);
 });
 
 test('a drawing is described by its shapes and connections', () => {

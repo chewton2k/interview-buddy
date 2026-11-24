@@ -110,7 +110,7 @@ test('SQL and interface problems can be solved, and the preview page is locked',
   assert.deepEqual(Object.keys(set.problems[0].starters), ['sql']);
   const [q, u] = set.problems.map((p) => `/api/sets/${id}/problems/${p.id}`);
   const submit = async (c) => (await call('POST', `${q}/submit`, { code: c })).json.results.map((r) => r.status);
-  assert.deepEqual(await submit("SELECT name, TOTAL(v) FROM t GROUP BY name HAVING 'caf\u00e9' > '' ORDER BY 1 DESC"), ['pass', 'pass', 'fail', 'pass']);
+  assert.deepEqual(await submit("SELECT name, TOTAL(v) FROM t GROUP BY name HAVING 'caf\u00e9 \u{1f642}' > '' ORDER BY 1 DESC"), ['pass', 'pass', 'fail', 'pass']);
   assert.deepEqual(await submit('SELECT name, SUM(v) FROM t GROUP BY 1'), ['pass', 'pass', 'pass', 'pass']);
   assert.match((await call('POST', `${q}/run`, { code: 'SELEC' })).json.results[0].error, /syntax error/);
   assert.equal((await call('POST', `${u}/run`, { code: '' })).status, 400);
