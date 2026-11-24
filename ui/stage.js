@@ -26,6 +26,16 @@ const el = (tag, attrs, ...children) => fill(document.createElement(tag), attrs,
 const svg = (tag, attrs, ...children) => fill(document.createElementNS(NS, tag), attrs, children);
 const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const colors = Object.fromEntries(['text', 'second', 'muted', 'line', 'card', 'raised', 'mark', 'mark-soft', 'blue', 'green', 'red', 'orange', 'teal'].map((c) => [c.replace('-s', 'S'), `var(--${c})`]));
+// Canvas does not understand var(), so theme colors are resolved on the way in.
+for (const key of ['fillStyle', 'strokeStyle']) {
+  const own = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, key);
+  Object.defineProperty(CanvasRenderingContext2D.prototype, key, {
+    ...own,
+    set(v) {
+      own.set.call(this, typeof v === 'string' ? v.replace(/var\((--[\w-]+)\)/g, (_, name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim()) : v);
+    },
+  });
+}
 const num = (v) => (typeof v !== 'number' ? String(v) : Math.abs(v) >= 1e5 || (v !== 0 && Math.abs(v) < 1e-3) ? v.toExponential(2) : String(Number(v.toPrecision(4))));
 
 function math(root, tex, display = false) {

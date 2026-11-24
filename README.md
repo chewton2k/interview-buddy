@@ -27,7 +27,11 @@ The command starts a server on `http://localhost:4747` and opens it in your brow
 3. Each problem is written and then checked on your computer before you see it.
 4. You answer, run the tests and ask for feedback.
 
-Choose the account, model and effort in Settings, separately for writing problems and for grading answers.
+Choose the account, model and effort in Settings, separately for writing problems, grading answers, and chat and analysis.
+
+- **Analyze** draws your own solution as an interactive picture. Python runs are recorded line by line, so the picture shows what your code really did. For other work the model draws it from your answer.
+- **Ask** opens a chat beside the problem. It sees your current work.
+- **Make a problem** turns a link or an idea into a problem, such as "https://... make this into a quant problem". It is on the home page, in every set, and in the chat.
 
 ## What is checked
 
@@ -44,13 +48,17 @@ A draft that fails is sent back with the reason, up to three tries. One model wr
 - Your code and generated code run under macOS `sandbox-exec` with no network, no access to your home folder, no writes outside a temporary folder, no new processes while running, a 10 second limit and a 1 GB memory limit. If the sandbox does not start, nothing runs.
 - Apple marks `sandbox-exec` as deprecated and the profile blocks listed things rather than allowing listed things. It is meant to contain mistakes, not a determined attacker.
 - The server listens on `127.0.0.1` only and refuses requests from other sites. Other programs on your computer can still reach it.
-- Postings and answers go to the model account you choose, and nowhere else. Sets and settings are stored in `~/.interview-buddy`.
+- Analysis pages are written by a model and run in a locked frame with no network, no storage and no access to the app.
+- Links are opened only when you paste them. Addresses inside your computer or local network are refused, including through redirects.
+- Code under test can read the environment variables Interview Buddy was started with. It has no network to send them anywhere, but they could appear in its output.
+- Postings, answers, chats and the text of links you paste go to the model account you choose, and nowhere else. Sets and settings are stored in `~/.interview-buddy`.
 
 ## Limits
 
 - Code and number problems need macOS. Elsewhere only written problems work.
 - Functions use numbers, strings, booleans and nested lists. Trees, graphs and class designs are expressed with those.
 - There is no circuit or Verilog simulator.
+- Links must be readable pages. PDFs and pages that need a browser or a sign-in have to be pasted as text.
 
 ## Development
 

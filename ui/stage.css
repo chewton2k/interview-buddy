@@ -18,13 +18,14 @@ h2 { font-size: 20px; line-height: 28px; font-weight: 500; }
 h3 { font-size: 16px; line-height: 24px; font-weight: 500; }
 svg { display: block; max-width: 100%; height: auto; }
 svg text { font-family: inherit; }
+#stage :not(code, pre, code *, pre *, math, math *) { font-family: "Atkinson Hyperlegible Next Variable", system-ui, sans-serif !important; }
 code, pre { font-family: "Atkinson Hyperlegible Mono Variable", ui-monospace, monospace; font-size: 14px; }
 :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-input[type="range"] { accent-color: var(--ink); width: 100%; min-width: 0; margin: 0; }
+input[type="range"] { accent-color: var(--ink) !important; width: 100%; min-width: 0; margin: 0; }
 mark { background: var(--mark-soft); color: inherit; padding: 1px 2px; border-radius: 3px 8px 4px 10px / 8px 4px 10px 4px; }
 .stage-caption { min-height: 48px; }
 .stage-player { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
-.stage-button { font: 500 14px/20px inherit; font-family: inherit; height: 36px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+.stage-button { font-size: 14px; line-height: 20px; font-weight: 500; white-space: nowrap; flex: none; height: 36px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
 .stage-button.primary { background: var(--ink); border-color: var(--ink); color: var(--on-ink); min-width: 68px; }
 .stage-button:disabled { opacity: 0.5; cursor: default; }
 .stage-count { font-size: 14px; color: var(--second); white-space: nowrap; font-variant-numeric: tabular-nums; }

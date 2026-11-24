@@ -116,9 +116,9 @@ a.item:hover, .over .item { background: var(--well); }
 .bench { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); height: calc(100vh - 56px); }
 .bench.analysis { grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); }
 .bench.asking { grid-template-columns: minmax(0, 4fr) minmax(0, 5fr) 340px; }
-.bench.asking.analysis { grid-template-columns: minmax(0, 5fr) minmax(0, 4fr) 340px; }
+.bench.asking.analysis { grid-template-columns: minmax(0, 6fr) minmax(0, 4fr) 340px; }
 .brief .case[aria-pressed="true"] { background: var(--raised); border-color: transparent; }
-.analysis iframe { width: 100%; height: max(480px, calc(100vh - 320px)); border: 0; background: var(--card); color-scheme: light dark; }
+.analysis iframe { width: 100%; height: max(600px, calc(100vh - 300px)); border: 0; background: var(--card); color-scheme: light dark; }
 .analysis iframe:fullscreen { padding: 24px 32px; }
 .chat { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 12px; padding: 16px; background: var(--card); border-left: 1px solid var(--line); min-height: 0; min-width: 0; }
 .talk { overflow: auto; display: flex; flex-direction: column; gap: 16px; overflow-wrap: anywhere; }
