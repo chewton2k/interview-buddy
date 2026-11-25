@@ -37,6 +37,7 @@ Choose Claude or Codex and a model in Settings. It is used for everything. Setti
 - **Analyze** draws your own solution as an interactive picture. Python runs are recorded line by line, so the picture shows what your code really did. For other work the model draws it from your answer.
 - **Ask** opens a chat beside other problems. It sees your current work.
 - **Make a problem** turns a link or an idea into a problem, such as "https://... make this into a quant problem". It is on the home page, in every set, and in the chat.
+- **Add more problems** writes 1 to 10 new ones for a set you already have, from the same posting, without repeating what is there.
 
 ## What is checked
 

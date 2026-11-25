@@ -162,7 +162,7 @@ test('a set can be listed, solved in every kind and deleted', async () => {
   const row = (await call('GET', '/api/sets')).json.sets.find((s) => s.id === id);
   assert.deepEqual([row.total, row.solved, row.quote], [3, 3, 'write clean Python']);
 
-  for (const [path, body] of [[`${n}/run`, ok], [`${c}/check`, { answer: '1' }], [`${c}/run`, { ...ok, language: 'ruby' }], [`${c}/run`, { language: 'python' }], [`${c}/retry`, {}], [`/api/sets/${id}/retry`, {}]]) assert.equal((await call('POST', path, body)).status, 400, path);
+  for (const [path, body] of [[`${n}/run`, ok], [`${c}/check`, { answer: '1' }], [`${c}/run`, { ...ok, language: 'ruby' }], [`${c}/run`, { language: 'python' }], [`${c}/retry`, {}], [`/api/sets/${id}/retry`, {}], [`/api/sets/${id}/more`, { count: 0 }]]) assert.equal((await call('POST', path, body)).status, 400, path);
   assert.equal((await call('POST', `/api/sets/${id}/problems/nope/run`, ok)).status, 404);
   assert.equal((await call('DELETE', `/api/sets/${id}`)).status, 200);
   assert.equal((await call('GET', `/api/sets/${id}`)).status, 404);

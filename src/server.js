@@ -4,7 +4,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkNumber } from './answers.js';
-import { addProblem, checkRequest, createSet, grade, GROUPS, LEVELS, personalSet, retryProblem, retrySet, stopSet } from './generate.js';
+import { addMore, addProblem, checkRequest, createSet, grade, GROUPS, LEVELS, personalSet, retryProblem, retrySet, stopSet } from './generate.js';
 import { fits, same, starter } from './harness.js';
 import { findLinks } from './link.js';
 import { ping, ProviderError, providerStatus } from './providers.js';
@@ -150,7 +150,7 @@ const routes = [
     return { ok: true };
   }],
   ['GET', /^\/api\/sets$/, async () => ({
-    sets: (await listSets()).map((s) => ({ id: s.id, createdAt: s.createdAt, company: s.intake.company, role: s.intake.role, level: s.intake.level, status: s.status, busy: s.status === 'planning' || s.problems.some((p) => ['queued', 'writing'].includes(p.status)), total: s.problems.length, solved: s.problems.filter((p) => p.progress === 'solved').length, quote: s.problems.find((p) => p.quote)?.quote ?? '' })),
+    sets: (await listSets()).map((s) => ({ id: s.id, createdAt: s.createdAt, company: s.intake.company, role: s.intake.role, level: s.intake.level, status: s.status, busy: s.status === 'planning' || Boolean(s.adding && !s.adding.error) || s.problems.some((p) => ['queued', 'writing'].includes(p.status)), total: s.problems.length, solved: s.problems.filter((p) => p.progress === 'solved').length, quote: s.problems.find((p) => p.quote)?.quote ?? '' })),
   })],
   ['POST', /^\/api\/sets$/, async (_, body) => ({ id: (await createSet(body)).id })],
   ['GET', /^\/api\/sets\/([^/]+)$/, async ([id]) => {
@@ -167,6 +167,7 @@ const routes = [
     return add(await personalSet(), body);
   }],
   ['POST', /^\/api\/sets\/([^/]+)\/problems$/, ([id], body) => add(id, body)],
+  ['POST', /^\/api\/sets\/([^/]+)\/more$/, async ([id], body) => (await addMore(id, body), {})],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/chat$/, async ([id, pid], body) => (await chat(id, pid, body), {})],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/analyze$/, async ([id, pid], body) => (await analyze(id, pid, body), {})],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/analyze\/repair$/, async ([id, pid], body) => (await repair(id, pid, body), {})],

@@ -58,7 +58,7 @@ export function useLoad(path, again = () => false) {
   }, [tick]);
   return { value, error, load };
 }
-export const useSet = (id) => useLoad(`/sets/${id}`, ({ set }) => set.status === 'planning' || set.problems.some((p) => ['queued', 'writing'].includes(p.status) || p.chatBusy || p.visual?.status === 'working'));
+export const useSet = (id) => useLoad(`/sets/${id}`, ({ set }) => set.status === 'planning' || (set.adding && !set.adding.error) || set.problems.some((p) => ['queued', 'writing'].includes(p.status) || p.chatBusy || p.visual?.status === 'working'));
 
 export function useTheme() {
   const now = () => document.documentElement.dataset.theme;

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
-import { AddProblem } from './add.jsx';
+import { AddMore, AddProblem } from './add.jsx';
 import { api, Icon, Problem, useAction, useLoad, useSet } from './lib.jsx';
 
 const solved = (n, total) => `${n} of ${total} solved`;
@@ -192,6 +192,7 @@ export function SetPage({ params: [id] }) {
               ))}
             </ol>
           )}
+          {set.status === 'ready' && !set.intake.personal && <AddMore set={set} onAdded={load} />}
           {set.status === 'ready' && <AddProblem setId={id} subjects={set.intake.subjects} onAdded={load} />}
         </div>
       </div>

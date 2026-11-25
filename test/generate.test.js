@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { brief, calls, clearCalls, code, intake, numeric, replies, sql, ui, written } from './stub/setup.js';
 import { checkNumber, findQuote, parseNumber } from '../src/answers.js';
-import { checkIntake, createSet, grade, recoverInterrupted, retryProblem, retrySet, stopSet, SUBJECTS, writeProblem } from '../src/generate.js';
+import { addMore, checkIntake, createSet, grade, recoverInterrupted, retryProblem, retrySet, stopSet, SUBJECTS, writeProblem } from '../src/generate.js';
 import { createSetFile, deleteSet, readSet, updateProblem, updateSet } from '../src/store.js';
 
 const choice = { provider: 'claude', model: 'sonnet', effort: '' };
@@ -120,6 +120,56 @@ test('a plan that misses a subject is asked again, then fails and can be retried
   await assert.rejects(retrySet(id), /not waiting/);
   replies([{ match: 'Plan', reply: { problems: [] } }]);
   assert.match((await settled((await createSet(intake)).id)).error, /left out Coding/);
+});
+
+test('more problems join a set, avoid the ones it has and fail without touching them', async () => {
+  replies([plan(brief()), write(code())]);
+  const { id } = await createSet({ ...intake, subjects: ['Coding', 'Math'], count: 2 });
+  await assert.rejects(addMore(id, { count: 1 }), /Wait until this set is planned/);
+  await settled(id);
+  replies([plan(brief(), brief({ subject: 'Math', kind: 'numeric' })), { match: 'kind: code.', reply: code() }, { match: 'kind: numeric.', reply: numeric() }]);
+  await retrySet(id);
+  const first = (await settled(id)).problems;
+  await updateProblem(id, first[0].id, (p) => void (p.progress = 'solved'));
+  const added = async (test) => {
+    for (let i = 0; i < 400; i++) {
+      const s = await readSet(id);
+      if (test(s)) return s;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    throw new Error('never added');
+  };
+
+  replies([{ match: 'Plan a practice set', exit: 'usage limit reached' }]);
+  await addMore(id, { count: 1 });
+  const broken = await added((s) => s.adding?.error);
+  assert.match(broken.adding.error, /usage limit/);
+  assert.equal(broken.status, 'ready');
+  assert.deepEqual(broken.problems.map((p) => p.id), first.map((p) => p.id));
+
+  replies([plan(brief({ title: 'Halve it' })), write(code())]);
+  clearCalls();
+  await addMore(id, { count: 1 });
+  await assert.rejects(addMore(id, { count: 1 }), /already asked for/);
+  const s = await added((s) => s.problems[2]?.status === 'ready');
+  assert.equal(s.adding, undefined);
+  assert.deepEqual(s.problems.map((p) => [p.title, p.progress]), [['Double it', 'solved'], ['Double it', 'open'], ['Halve it', 'open']]);
+  assert.match(calls()[0].prompt, /join the problems in "existing"/);
+  assert.match(calls()[0].prompt, /"title": "Double it"/);
+  assert.match(calls()[0].prompt, /Use only the listed subjects/);
+
+  replies([plan(brief({ subject: 'Biology', kind: 'written' })), { match: 'kind: written.', reply: written() }]);
+  await addMore(id, { count: 1, subject: 'Biology' });
+  assert.equal((await added((s) => s.problems[3]?.status === 'ready')).problems[3].subject, 'Biology');
+
+  for (const count of [0, 11, 1.5, '3', undefined]) await assert.rejects(addMore(id, { count }), /between 1 and 10/);
+  await updateSet(id, (s) => void (s.problems = [...Array(95)].map(() => s.problems[0])));
+  await assert.rejects(addMore(id, { count: 6 }), /up to 100/);
+  await updateSet(id, (s) => void (s.adding = { count: 2, subject: '' }));
+  await recoverInterrupted();
+  assert.match((await readSet(id)).adding.error, /closed before/);
+  await updateSet(id, (s) => void (s.intake.personal = true));
+  await assert.rejects(addMore(id, { count: 1 }), /no posting/);
 });
 
 test('a usage limit stops the rest of the set, and one problem can be retried', async () => {

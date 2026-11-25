@@ -62,12 +62,13 @@ ${KIND_GUIDE} Follow the kind they ask for. Otherwise use the one an interviewer
 topic is two or three sentences telling the author exactly what to write. title is at most 8 words in sentence case.
 ${data({ request: p.request, guidance: p.guidance, level: intake.level, ...(intake.personal ? {} : { company: intake.company, role: intake.role }), source: p.source })}`;
 
-const planPrompt = (intake) => `Plan a practice set of exactly ${intake.count} problems for the interview described below.
-Use every listed subject at least once and no other subject. Match the level, the company's domain and what the rounds test. Order from easier to harder, and vary the topics.
+const covers = ({ subjects, count }) => subjects.length <= count;
+const planPrompt = (intake, existing) => `Plan a practice set of exactly ${intake.count} problems for the interview described below.
+${existing.length ? 'They join the problems in "existing". Do not repeat the task, method or quote of any of those.\n' : ''}${covers(intake) ? 'Use every listed subject at least once and no other subject.' : 'Use only the listed subjects.'} Match the level, the company's domain and what the rounds test. Order from easier to harder, and vary the topics.
 ${KIND_GUIDE} Prefer code for coding and machine learning, sql for SQL, ui for frontend, numeric for quant, math, statistics, physics, chemistry, mechanics, circuits and finance, and written for system design, UI/UX, product, case, biology and behavioral, unless the rounds suggest otherwise. Behavioral problems ask for a real story and are graded on situation, actions, result and reflection.
 quote must be 3 to 15 consecutive words copied exactly from "posting" or "rounds" that the problem trains. Prefer a different quote for each problem. Use an empty string only when nothing fits.
 topic is one sentence telling the author what to write. title is at most 8 words in sentence case.
-${data(intake)}`;
+${data(existing.length ? { ...intake, existing: existing.map((p) => ({ title: p.title, subject: p.subject, topic: p.topic, quote: p.quote })) } : intake)}`;
 
 const rules = {
   code: `kind: code. The candidate writes one function. Types allowed: ${TYPES}. No other types, so express trees, graphs, linked lists and class designs with lists or lists of operations.
@@ -220,11 +221,11 @@ export async function writeProblem({ intake, brief, choice, signal, onStep = () 
   throw new Rejected(`Did not pass the checks after ${MAX_TRIES} tries. Last problem: ${reason}`);
 }
 
-async function plan(intake, choice, signal) {
+async function plan(intake, existing, choice, signal) {
   for (let attempt = 1; ; attempt++) {
-    const { problems } = await ask({ ...choice, prompt: planPrompt(intake), schema: planSchema(intake.subjects), signal });
+    const { problems } = await ask({ ...choice, prompt: planPrompt(intake, existing), schema: planSchema(intake.subjects), signal });
     const briefs = problems.slice(0, intake.count);
-    const missing = intake.subjects.filter((s) => !briefs.some((b) => b.subject === s));
+    const missing = !covers(intake) ? [] : intake.subjects.filter((s) => !briefs.some((b) => b.subject === s));
     if (briefs.length === intake.count && !missing.length) {
       return briefs.map((b) => ({ ...b, quote: findQuote(intake.posting, b.quote) ?? findQuote(intake.rounds, b.quote) ?? '' }));
     }
@@ -234,6 +235,7 @@ async function plan(intake, choice, signal) {
 
 const blank = (b) => ({ id: randomUUID(), ...b, status: 'queued', step: null, error: null, body: null, progress: 'open', draft: {}, feedback: null });
 
+const FULL = 100;
 const jobs = new Map();
 const STOPS = ['auth', 'rate', 'timeout', 'missing'];
 let busy = 0;
@@ -304,21 +306,25 @@ export async function tracked(setId, fn) {
 
 const runQueued = (setId, pids, job) => Promise.all(pids.map((pid) => turn(() => generate(setId, pid, job))));
 
-async function planAndRun(setId) {
+/** `more` adds to a planned set. Its failure is kept apart, so the problems already there stay usable. */
+async function planAndRun(setId, more) {
   await tracked(setId, async (job) => {
     try {
-      const { intake } = await readSet(setId);
+      const { intake, problems } = await readSet(setId);
       const choice = await chosen();
-      const briefs = await turn(() => plan(intake, choice, job.signal));
+      const wanted = more ? { ...intake, count: more.count, subjects: more.subject ? [more.subject] : intake.subjects } : intake;
+      const briefs = await turn(() => plan(wanted, problems, choice, job.signal));
       const pids = await updateSet(setId, (s) => {
         s.status = 'ready';
-        s.problems = briefs.map((b) => blank(b));
-        return s.problems.map((p) => p.id);
+        delete s.adding;
+        const made = briefs.map((b) => blank(b));
+        s.problems.push(...made);
+        return made.map((p) => p.id);
       });
       await runQueued(setId, pids, job);
     } catch (e) {
       if (job.signal.aborted) return;
-      await updateSet(setId, (s) => void Object.assign(s, { status: 'failed', error: e.message }));
+      await updateSet(setId, (s) => void Object.assign(s, more ? { adding: { ...more, error: e.message } } : { status: 'failed', error: e.message }));
     }
   });
 }
@@ -329,6 +335,20 @@ export async function createSet(body) {
   return set;
 }
 
+/** Plans more problems for a set from its posting, different from the ones it has. */
+export async function addMore(setId, body) {
+  if (!Number.isInteger(body?.count) || body.count < 1 || body.count > 10) throw new Invalid('Choose between 1 and 10 problems');
+  const more = { count: body.count, subject: body.subject ? text(body.subject, 'Subject', 40, true) : '' };
+  await updateSet(setId, (s) => {
+    if (s.status !== 'ready') throw new Invalid('Wait until this set is planned');
+    if (s.intake.personal) throw new Invalid('This set has no posting. Make a problem from a link or an idea.');
+    if (s.adding && !s.adding.error) throw new Invalid('Wait until the problems you already asked for are planned');
+    if (s.problems.length + more.count > FULL) throw new Invalid(`A set holds up to ${FULL} problems`);
+    s.adding = more;
+  });
+  planAndRun(setId, more);
+}
+
 export const checkRequest = (b) => ({ request: text(b?.request, 'Link or idea', 6000, true), subject: b.subject ? text(b.subject, 'Subject', 40, true) : '' });
 
 /** Adds one problem made from a link or an idea. Only `links` are opened, never links found elsewhere. */
@@ -336,7 +356,7 @@ export async function addProblem(setId, { request, subject, links, guidance = ''
   const p = blank({ title: 'New problem', subject, kind: '', difficulty: '', topic: '', quote: '', request, guidance, links });
   await updateSet(setId, (s) => {
     if (s.status !== 'ready') throw new Invalid('Wait until this set is planned');
-    if (s.problems.length >= 100) throw new Invalid('This set is full. Start another one.');
+    if (s.problems.length >= FULL) throw new Invalid('This set is full. Start another one.');
     s.problems.push(p);
   });
   tracked(setId, (job) => runQueued(setId, [p.id], job));
@@ -373,6 +393,7 @@ export async function recoverInterrupted() {
   for (const { id } of await listSets()) {
     await updateSet(id, (s) => {
       if (s.status === 'planning') Object.assign(s, { status: 'failed', error: message });
+      if (s.adding) s.adding.error ??= message;
       for (const p of s.problems) if (p.status === 'queued' || p.status === 'writing') Object.assign(p, { status: 'failed', step: null, error: message });
       for (const p of s.problems) {
         if (p.chatBusy) Object.assign(p, { chatBusy: false, chatError: message });
