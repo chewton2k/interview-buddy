@@ -132,3 +132,11 @@ test('line diffs keep shared lines, mark changes and fold distant context', asyn
   assert.deepEqual(folded[0], { skip: 16 });
   assert.deepEqual(folded.slice(1).map((l) => l.op), [' ', ' ', ' ', '-', '+']);
 });
+
+test('replies are read aloud as plain sentences', async () => {
+  const { spoken, sentences } = await import('../ui/speak.js');
+  assert.equal(spoken('**Good.** Try `two_sum` in $O(n \\log n)$, see [docs](https://x.y).\n```py\nx = 1\n```\n- Then test it'), 'Good. Try two sum in O(n log n), see docs. (see the code in the chat) Then test it');
+  assert.equal(spoken('Is $i \\le n$? See https://a.b/c'), 'Is i at most n? See a link');
+  assert.deepEqual(sentences('One. Two? Three'), ['One.', 'Two?', 'Three']);
+  assert.ok(sentences('word '.repeat(100).trim(), 50).every((s) => s.length <= 50));
+});

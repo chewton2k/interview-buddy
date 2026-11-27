@@ -107,6 +107,12 @@ textarea.sheet:focus-visible { outline-offset: 0; }
 
 .list { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .list > li + li { border-top: 1px solid var(--line); }
+.area { padding: 16px 20px; }
+.scores { display: grid; grid-template-columns: minmax(0, 1fr) repeat(3, auto); gap: 8px 24px; font-variant-numeric: tabular-nums; }
+.scores > [role=row] { display: contents; }
+.scores [role=cell]:not(:first-child), .scores [role=columnheader]:not(:first-child) { text-align: right; }
+.bullets { list-style: disc; padding-left: 20px; display: grid; gap: 4px; }
+ol.bullets { list-style: decimal; padding-left: 24px; }
 .item { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 4px 12px; padding: 16px 20px; text-decoration: none; align-items: start; transition: background-color 140ms var(--ease); }
 a.item:hover, .over .item { background: var(--well); }
 .item .n { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -330,8 +336,8 @@ math-field:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; 
 }
 @media (max-width: 480px) {
   .logo { font-size: 16px; }
-  .top .btn .long { display: none; }
-  .top .btn { padding: 0 12px; }
+  .top .btn > span { display: none; }
+  .top .btn { padding: 0 10px; }
   .panel { padding: 16px; }
   .padtabs .mono { display: none; }
   .kv { grid-template-columns: minmax(0, 1fr); gap: 4px; }

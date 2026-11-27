@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { Intake } from './intake.jsx';
 import { Icon } from './lib.jsx';
 import { ProblemPage } from './problem.jsx';
+import { Progress } from './progress.jsx';
 import { SetPage, Sets } from './sets.jsx';
 import { Settings } from './settings.jsx';
 
@@ -12,6 +13,7 @@ window.EXCALIDRAW_ASSET_PATH = '/';
 const ROUTES = [
   [/^#\/new$/, Intake],
   [/^#\/settings$/, Settings],
+  [/^#\/progress$/, Progress],
   [/^#\/sets\/([^/]+)\/([^/]+)$/, ProblemPage],
   [/^#\/sets\/([^/]+)$/, SetPage],
   [/^/, Sets],
@@ -34,7 +36,7 @@ function App() {
   }, [hash]);
   const [re, Page] = ROUTES.find(([r]) => r.test(hash));
   const params = hash.match(re).slice(1);
-  const settings = Page === Settings;
+  const current = (page) => ((Page === Intake ? null : [Settings, Progress].includes(Page) ? Page : Sets) === page ? 'page' : undefined);
   return (
     <>
       <header class="top">
@@ -42,14 +44,17 @@ function App() {
           Interview <span class="mark">Buddy</span>
         </a>
         <nav aria-label="Main">
-          <a href="#/" aria-current={settings || Page === Intake ? undefined : 'page'}>
+          <a href="#/" aria-current={current(Sets)}>
             Sets
           </a>
-          <a href="#/settings" aria-current={settings ? 'page' : undefined}>
+          <a href="#/progress" aria-current={current(Progress)}>
+            Progress
+          </a>
+          <a href="#/settings" aria-current={current(Settings)}>
             Settings
           </a>
         </nav>
-        <a class="btn primary" href="#/new">
+        <a class="btn primary" href="#/new" aria-label="New set">
           <Icon name="plus" />
           <span>
             New<span class="long"> set</span>

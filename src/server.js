@@ -8,6 +8,7 @@ import { addMore, addProblem, checkRequest, createSet, grade, GROUPS, LEVELS, pa
 import { fits, same, starter } from './harness.js';
 import { findLinks } from './link.js';
 import { ping, ProviderError, providerStatus } from './providers.js';
+import { buildReport, progressStats, readReport } from './progress.js';
 import { checkFiles, LANGUAGES, runCode, runProgram, runProject, selfTest, tools } from './sandbox.js';
 import { checkDrawing, checkSettings, deleteSet, Invalid, listSets, NotFound, readDrawing, readSet, readSettings, saveDrawing, saveSettings, updateProblem } from './store.js';
 import { analyze, chat, repair, visualOf } from './tutor.js';
@@ -75,6 +76,7 @@ async function readyProblem(setId, pid) {
 }
 const advance = (solved) => (p) => {
   if (p.progress !== 'solved') p.progress = solved ? 'solved' : 'tried';
+  p.triedAt = new Date().toISOString();
 };
 const kindOnly = (problem, ...kinds) => {
   if (!kinds.includes(problem.kind)) throw new Invalid('That does not apply to this kind of problem');
@@ -166,6 +168,12 @@ const routes = [
     const r = await ping(checkSettings(body));
     if (r.ok !== true) throw new ProviderError('badjson', 'The model replied, but not as asked');
     return { ok: true };
+  }],
+  ['GET', /^\/api\/progress$/, async () => ({ stats: await progressStats(), report: await readReport() })],
+  ['POST', /^\/api\/progress$/, async (_, __, signal) => {
+    const report = await buildReport(signal);
+    if (!report) throw new Invalid('Finish or get feedback on a problem first');
+    return { report };
   }],
   ['GET', /^\/api\/sets$/, async () => ({
     sets: (await listSets()).map((s) => ({ id: s.id, createdAt: s.createdAt, company: s.intake.company, role: s.intake.role, level: s.intake.level, status: s.status, busy: s.status === 'planning' || Boolean(s.adding && !s.adding.error) || s.problems.some((p) => ['queued', 'writing'].includes(p.status)), total: s.problems.length, solved: s.problems.filter((p) => p.progress === 'solved').length, quote: s.problems.find((p) => p.quote)?.quote ?? '' })),
@@ -293,7 +301,7 @@ const routes = [
     if (!answer.trim() && !drawing) throw new Invalid('Write or draw an answer first');
     const feedback = await grade({ problem, answer, drawing, outcome: needText(body.outcome ?? '', 'Outcome', 6000), signal });
     await updateProblem(id, pid, (p) => {
-      p.feedback = feedback;
+      p.feedback = { ...feedback, at: new Date().toISOString() };
       if (p.kind === 'written') advance(feedback.score >= 0.8)(p);
     });
     return { feedback };

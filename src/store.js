@@ -126,3 +126,7 @@ export async function saveSettings(s) {
   await writeJson(path.join(home(), 'settings.json'), clean);
   return clean;
 }
+
+const progressFile = () => path.join(home(), 'progress.json');
+export const readProgress = () => readJson(progressFile()).catch((e) => (e instanceof NotFound || e instanceof SyntaxError ? null : Promise.reject(e)));
+export const saveProgress = (report) => writeJson(progressFile(), report);

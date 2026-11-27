@@ -39,6 +39,8 @@ Choose Claude or Codex and a model in Settings. It is used for everything. Setti
 - **Ask** opens a chat beside other problems. It sees your current work.
 - **Make a problem** turns a link or an idea into a problem, such as "https://... make this into a quant problem". It is on the home page, in every set, and in the chat.
 - **Add more problems** writes 1 to 10 new ones for a set you already have, from the same posting, without repeating what is there.
+- **Progress** counts what you tried, solved and scored by subject. Find my weak spots reads every problem you tried, with its result and feedback, and names the mistakes that keep coming back, such as untested edge cases or AI edits accepted without checking, with links to the problems that show them. Each weak spot has a button that makes a new problem to train it.
+- **Spoken interviewer.** The speaker button beside the interviewer reads its replies aloud with the voices already on your Mac, and nothing is downloaded. Code is left out of what it says. It picks an Enhanced or Premium English voice if you have one, which you can add in System Settings, Accessibility, Spoken Content.
 
 ## What is checked
 
