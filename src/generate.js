@@ -36,6 +36,9 @@ export const problemSchema = {
 };
 const gradeSchema = obj({ summary: str, points: list(obj({ mark: oneOf('met', 'partial', 'missed'), note: str })) });
 
+/** A transcript line. Assistant edits are summed up with what the candidate chose, so reviewers see how its output was used. */
+export const said = ({ role, text, edits }) => ({ role, text: edits?.length ? `${text}\n[Proposed edits: ${edits.map((e) => `${e.path} ${e.status}`).join(', ')}]` : text });
+
 export const data = (value) => `<data>\n${JSON.stringify(value, null, 1).replace(/</g, '\\u003c')}\n</data>`;
 
 const text = (v, name, max, required) => {
@@ -453,7 +456,7 @@ export async function grade({ problem, answer, outcome, drawing, signal }) {
   const choice = await chosen();
   const { statement, rubric, solutionText, solutionCode, answer: correct, unit } = problem.body;
   const prompt = `Grade this interview answer as a fair, specific interviewer. Give one entry in points for each of the ${rubric.length} rubric points, in order. mark is met, partial or missed. note is one or two sentences addressed to the candidate that point at what they wrote, and is empty when the point is fully met. summary is two sentences with the single most useful next step. Grade only what is written. When there is an interview transcript, let summary also say how well they communicated, such as clarifying, explaining the approach and testing. When there is an AI assistant transcript, judge what they asked it and whether they checked its answers before using them. Use $...$ for math.
-${data({ statement, rubric, reference: solutionCode ?? solutionText, correct_answer: correct === undefined ? undefined : `${correct} ${unit}`, outcome, candidate_answer: answer, candidate_drawing: drawing?.outline, interview_transcript: problem.chat?.slice(-30).map(({ role, text }) => ({ role: role === 'user' ? 'candidate' : 'interviewer', text })), ai_assistant_transcript: problem.assistant?.slice(-30).map(({ role, text }) => ({ role: role === 'user' ? 'candidate' : 'assistant', text })), clock: problem.session ?? undefined })}${drawing ? '\nThe attached image is the drawing that is part of their answer. Judge what it shows.' : ''}`;
+${data({ statement, rubric, reference: solutionCode ?? solutionText, correct_answer: correct === undefined ? undefined : `${correct} ${unit}`, outcome, candidate_answer: answer, candidate_drawing: drawing?.outline, interview_transcript: problem.chat?.slice(-30).map(({ role, text }) => ({ role: role === 'user' ? 'candidate' : 'interviewer', text })), ai_assistant_transcript: problem.assistant?.slice(-30).map((m) => ({ ...said(m), role: m.role === 'user' ? 'candidate' : 'assistant' })), clock: problem.session ?? undefined })}${drawing ? '\nThe attached image is the drawing that is part of their answer. Judge what it shows.' : ''}`;
   const g = await ask({ ...choice, prompt, schema: gradeSchema, images: drawing ? [drawing.png] : [], signal });
   if (g.points.length !== rubric.length) throw new ProviderError('badjson', 'The grader skipped part of the rubric. Try again.');
   const score = g.points.reduce((s, p) => s + (p.mark === 'met' ? 1 : p.mark === 'partial' ? 0.5 : 0), 0) / rubric.length;

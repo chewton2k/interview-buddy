@@ -120,3 +120,15 @@ test('grading, chat and analysis see the drawing', async () => {
   }
   await assert.rejects(chat(id, pid, { message: 'x', drawing: { png: 'bad' } }), /could not be read/);
 });
+
+test('line diffs keep shared lines, mark changes and fold distant context', async () => {
+  const { diffLines, fold } = await import('../ui/diff.js');
+  const ops = (a, b) => diffLines(a, b).map((l) => l.op + l.t).join('|');
+  assert.equal(ops('a\nb\nc', 'a\nx\nc'), ' a|-b|+x| c');
+  assert.equal(ops(null, 'new'), '+new');
+  assert.equal(ops('same', 'same'), ' same');
+  const long = Array.from({ length: 20 }, (_, i) => `l${i}`);
+  const folded = fold(diffLines(long.join('\n'), [...long.slice(0, 19), 'end'].join('\n')));
+  assert.deepEqual(folded[0], { skip: 16 });
+  assert.deepEqual(folded.slice(1).map((l) => l.op), [' ', ' ', ' ', '-', '+']);
+});

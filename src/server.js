@@ -219,6 +219,16 @@ const routes = [
   }],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/run$/, ([id, pid], body) => runFor(id, pid, body, true)],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/project\/(main|tests)$/, ([id, pid, mode], body) => runCodebase(id, pid, body, mode)],
+  ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/edits$/, async ([id, pid], body) => {
+    if (!['accepted', 'rejected'].includes(body.status)) throw new Invalid('Choose accepted or rejected');
+    await updateProblem(id, pid, (p) => {
+      const edit = (p.assistant ?? []).flatMap((m) => m.edits ?? []).find((e) => e.id === body.id);
+      if (!edit) throw new NotFound();
+      if (edit.status !== 'pending') throw new Invalid('You already chose for this file');
+      edit.status = body.status;
+    });
+    return {};
+  }],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/project\/submit$/, async ([id, pid], body) => {
     const r = await runCodebase(id, pid, body, 'submit');
     await updateProblem(id, pid, advance(r.solved));

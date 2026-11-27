@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { api, Icon, Problem, Prose, useAction } from './lib.jsx';
 
-export function Chat({ setId, problem, at, work, reload, onClose, presence, head, channel = 'chat', title = 'Ask', intro = 'Ask about the problem, your approach or a hint. It can see your current work. You can also paste a link and ask for a new problem.', placeholder = 'Ask anything about this problem' }) {
+export function Chat({ setId, problem, at, work, reload, onClose, presence, head, channel = 'chat', fields, extra, title = 'Ask', intro = 'Ask about the problem, your approach or a hint. It can see your current work. You can also paste a link and ask for a new problem.', placeholder = 'Ask anything about this problem' }) {
   const [text, setText] = useState('');
   const end = useRef();
   const list = problem[channel] ?? [];
   const [waiting, failed] = [problem[`${channel}Busy`], problem[`${channel}Error`]];
   useEffect(() => end.current?.scrollIntoView({ block: 'nearest' }), [list.length, waiting]);
   const send = useAction(async (extra) => {
-    await api('POST', `${at}/chat`, { ...(await work.current()), ...extra, channel });
+    await api('POST', `${at}/chat`, { ...(await work.current()), ...fields, ...extra, channel });
     if (!extra.retry) setText('');
     await reload();
   });
@@ -31,6 +31,7 @@ export function Chat({ setId, problem, at, work, reload, onClose, presence, head
           <div key={i} class={`said ${m.role}`}>
             <span class="sr">{m.role === 'user' ? 'You' : 'Reply'}</span>
             <Prose text={m.text} />
+            {extra?.(m)}
             {m.problemId && (
               <a class="btn" href={`#/sets/${setId}/${m.problemId}`}>
                 Open the new problem

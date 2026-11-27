@@ -2,11 +2,15 @@ import { useRef, useState } from 'preact/hooks';
 import { Chat } from './chat.jsx';
 import { Editor } from './editor.jsx';
 import { api, Icon, Problem, Prose, useAction, useDebounced } from './lib.jsx';
+import { diffLines, fold } from './diff.js';
 import { Clock, Console, OLDER, remember, Splitter, width } from './pad.jsx';
 import { Feedback, Source } from './parts.jsx';
 
 const INTRO = "I'm your interviewer. Look around the codebase, ask me about anything unclear, and use the AI assistant whenever it helps. Talk me through what you find.";
-const HELPER = 'I can see every file in your project and your last run. Ask me to explain code, find a bug, or write code or tests. Check what I give you before you use it.';
+const HELPER = {
+  ask: 'Ask mode: I see every file and your last run, and I answer, explain and suggest code. I cannot change your files.',
+  edit: 'Edit mode: I see every file and your last run, and I can change files. You get a diff for each file to accept or reject.',
+};
 const PATH = /^[A-Za-z0-9_][A-Za-z0-9_.-]*(\/[A-Za-z0-9_][A-Za-z0-9_.-]*){0,4}$/;
 const MODE = { py: 'python', js: 'javascript', ts: 'javascript', html: 'html', sql: 'sql' };
 const COMMAND = { main: 'python3 main.py', tests: 'python3 -m unittest discover tests -v', submit: 'Original and hidden tests' };
@@ -39,6 +43,32 @@ function Tree({ files, open, onOpen, changed }) {
   return <ul class="tree" aria-label="Files">{rows}</ul>;
 }
 
+function Edit({ edit, files, onPick, busy }) {
+  const before = edit.path in files ? files[edit.path] : null;
+  const lines = diffLines(before, edit.content);
+  const [added, removed] = ['+', '-'].map((op) => lines.filter((l) => l.op === op).length);
+  return (
+    <div class="change">
+      <div class="row between wrap">
+        <span class="mono small">{edit.path}{before === null && <span class="second"> new file</span>}</span>
+        <span class="small"><span class="good">+{added}</span> <span class="bad">-{removed}</span></span>
+      </div>
+      {/* Once chosen, the file has moved on, so the diff against it would no longer mean anything. */}
+      {edit.status === 'pending' && <pre class="diff" aria-label={`Changes to ${edit.path}`}>
+        {fold(lines).map((l, k) => (l.skip ? <span key={k} class="skip">{l.skip} unchanged {l.skip === 1 ? 'line' : 'lines'}</span> : <span key={k} class={l.op === '+' ? 'add' : l.op === '-' ? 'del' : ''}><i aria-hidden="true">{l.op}</i><span class="sr">{l.op === '+' ? 'Added: ' : l.op === '-' ? 'Removed: ' : ''}</span>{l.t || ' '}</span>))}
+      </pre>}
+      {edit.status === 'pending' ? (
+        <div class="row">
+          <button class="btn" disabled={busy} onClick={() => onPick(edit, 'accepted')}><Icon name="check" />Accept</button>
+          <button class="btn bare" disabled={busy} onClick={() => onPick(edit, 'rejected')}>Reject</button>
+        </div>
+      ) : (
+        <p class={`small ${edit.status === 'accepted' ? 'good' : 'second'}`}>{edit.status === 'accepted' ? 'Accepted' : 'Rejected'}</p>
+      )}
+    </div>
+  );
+}
+
 function Tests({ tests }) {
   return (
     <ul class="testlist">
@@ -62,6 +92,13 @@ export function Project({ set, problem, at, load }) {
   const [left, setLeft] = useState(draft.files ? 'files' : 'instructions');
   const [right, setRight] = useState(problem.session?.endedAt ? 'review' : 'terminal');
   const [talk, setTalk] = useState('chat');
+  const [mode, setMode] = useState(() => {
+    try {
+      return localStorage.getItem('assistant-mode') === 'ask' ? 'ask' : 'edit';
+    } catch {
+      return 'edit';
+    }
+  });
   const [leftWidth, setLeftWidth] = useState(() => width('pad-left', 320));
   const [rightWidth, setRightWidth] = useState(() => width('pad-right', 420));
   const [out, setOut] = useState(null);
@@ -103,6 +140,19 @@ export function Project({ set, problem, at, load }) {
     setFeedback((await api('POST', `${at}/feedback`, { answer: Object.keys(changes).length ? listing(changes) : 'The candidate changed no files.', outcome: `All tests: ${count(r)}\n${summary()}` })).feedback);
     await load();
   });
+  const decide = useAction(async (edit, status) => {
+    if (status === 'accepted') {
+      if (Object.keys(files).some((f) => f.startsWith(`${edit.path}/`) || edit.path.startsWith(`${f}/`))) return alert(`${edit.path} clashes with a file or folder that is already there.`);
+      change({ ...files, [edit.path]: edit.content }, edit.path);
+      setResets((r) => r + 1);
+    }
+    await api('POST', `${at}/edits`, { id: edit.id, status });
+    await load();
+  });
+  const pickMode = (m) => {
+    setMode(m);
+    remember('assistant-mode', m);
+  };
   const busy = exec.busy || finish.busy;
 
   const create = () => {
@@ -132,6 +182,12 @@ export function Project({ set, problem, at, load }) {
     <div class="cases" role="group" aria-label="Talk to">
       <button class="case" aria-pressed={talk === 'chat'} onClick={() => setTalk('chat')}>Interviewer</button>
       <button class="case" aria-pressed={talk === 'assistant'} onClick={() => setTalk('assistant')}>AI assistant</button>
+    </div>
+  );
+  const modes = (
+    <div class="cases" role="group" aria-label="Assistant mode">
+      <button class="case" aria-pressed={mode === 'ask'} onClick={() => pickMode('ask')}>Ask</button>
+      <button class="case" aria-pressed={mode === 'edit'} onClick={() => pickMode('edit')}>Edit</button>
     </div>
   );
   return (
@@ -196,7 +252,7 @@ export function Project({ set, problem, at, load }) {
             </div>
           </div>
           <div class="stack" aria-live="polite">
-            <Problem>{exec.error || clock.error || finish.error}</Problem>
+            <Problem>{exec.error || clock.error || finish.error || decide.error}</Problem>
             {right === 'terminal' && (
               <>
                 {out && !exec.busy && <p class="mono small muted">$ {COMMAND[out.mode]}</p>}
@@ -244,7 +300,7 @@ export function Project({ set, problem, at, load }) {
             )}
           </div>
         </section>
-        <Chat key={talk} presence={talk === 'chat'} head={head} channel={talk} title={talk === 'chat' ? 'Interviewer' : 'AI assistant'} intro={talk === 'chat' ? INTRO : HELPER} placeholder={talk === 'chat' ? 'Talk to your interviewer' : 'Ask the AI assistant'} setId={set.id} problem={problem} at={at} work={work} reload={load} />
+        <Chat key={talk} presence={talk === 'chat'} head={talk === 'chat' ? head : <>{head}{modes}</>} channel={talk} fields={{ mode }} extra={(m) => m.edits?.map((e) => <Edit key={e.id} edit={e} files={files} onPick={decide.run} busy={decide.busy} />)} title={talk === 'chat' ? 'Interviewer' : 'AI assistant'} intro={talk === 'chat' ? INTRO : HELPER[mode]} placeholder={talk === 'chat' ? 'Talk to your interviewer' : mode === 'edit' ? 'Ask the assistant to change code' : 'Ask the AI assistant'} setId={set.id} problem={problem} at={at} work={work} reload={load} />
       </div>
     </div>
   );

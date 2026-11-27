@@ -146,6 +146,7 @@ export const runProgram = ({ language, code, data = '', timeout = 10000, sandbox
   });
 
 const PATH = /^[A-Za-z0-9_][A-Za-z0-9_.-]*(\/[A-Za-z0-9_][A-Za-z0-9_.-]*){0,4}$/;
+export const plainPath = (p) => typeof p === 'string' && p.length <= 120 && PATH.test(p);
 /** Paths are written into the run folder outside the sandbox, so only plain relative ones get through. */
 export function checkFiles(files, max) {
   if (!files || typeof files !== 'object' || Array.isArray(files)) throw new Invalid('Files must be a map of paths to text');
@@ -153,7 +154,7 @@ export function checkFiles(files, max) {
   if (!entries.length || entries.length > 40) throw new Invalid('A project has 1 to 40 files');
   let size = 0;
   for (const [p, text] of entries) {
-    if (p.length > 120 || !PATH.test(p)) throw new Invalid(`${p.slice(0, 120)} is not a plain relative path, such as tests/test_cart.py`);
+    if (!plainPath(p)) throw new Invalid(`${p.slice(0, 120)} is not a plain relative path, such as tests/test_cart.py`);
     if (typeof text !== 'string') throw new Invalid(`${p} must be text`);
     size += text.length;
   }

@@ -337,6 +337,26 @@ test('a codebase problem runs main and tests, keeps an assistant transcript and 
   assert.ok(!helper.prompt.includes('reference_solution') && !helper.prompt.includes('rubric'), 'the assistant must not see the answer');
   assert.ok(interviewer.prompt.includes('Multiply by price.'), 'the interviewer sees the assistant transcript');
 
+  // Edit mode: only plain paths outside hidden/ survive, and each file is accepted or rejected once.
+  replies([
+    { match: 'Edit mode', reply: { reply: 'Changed the total.', edits: [{ path: 'shop/tally.py', content: projectFix }, { path: 'notes.md', content: 'x' }, { path: '../evil.py', content: 'x' }, { path: 'hidden/test_hidden.py', content: 'x' }] } },
+    { match: 'AI-native coding interview', reply: { reply: 'Did you run it?', new_problem: '' } },
+  ]);
+  clearCalls();
+  await call('POST', `${at}/chat`, { message: 'fix the total', channel: 'assistant', mode: 'edit', code: '### shop/tally.py' });
+  for (let i = 0; (await ready(id)).problems[0].assistantBusy && i < 200; i++) await new Promise((r) => setTimeout(r, 20));
+  const edits = (await ready(id)).problems[0].assistant.at(-1).edits;
+  assert.deepEqual(edits.map((e) => [e.path, e.status]), [['shop/tally.py', 'pending'], ['notes.md', 'pending']]);
+  assert.equal((await call('POST', `${at}/edits`, { id: edits[0].id, status: 'accepted' })).status, 200);
+  assert.equal((await call('POST', `${at}/edits`, { id: edits[0].id, status: 'rejected' })).status, 400);
+  assert.equal((await call('POST', `${at}/edits`, { id: edits[1].id, status: 'maybe' })).status, 400);
+  assert.equal((await call('POST', `${at}/edits`, { id: 'nope', status: 'rejected' })).status, 404);
+  await call('POST', `${at}/edits`, { id: edits[1].id, status: 'rejected' });
+  await call('POST', `${at}/chat`, { message: 'done', code: '### shop/tally.py' });
+  for (let i = 0; (await ready(id)).problems[0].chatBusy && i < 200; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.match(calls().at(-1).prompt, /Proposed edits: shop\/tally\.py accepted, notes\.md rejected/);
+  assert.match(calls()[0].prompt, /Edit mode/);
+
   await call('PUT', `${at}/draft`, { files: fixed, open: 'shop/tally.py' });
   assert.equal((await ready(id)).problems[0].draft.open, 'shop/tally.py');
   assert.equal((await call('POST', `${at}/session`, { action: 'start', minutes: 60 })).status, 200);

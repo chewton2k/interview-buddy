@@ -33,7 +33,7 @@ The command starts a server on `http://localhost:4747` and opens it in your brow
 Choose Claude or Codex and a model in Settings. It is used for everything. Settings also has light and dark mode.
 
 - **A coding pad, not a quiz page.** Run executes your file and prints to a console. You write your own tests, talk to an interviewer who sees your code, and can start a clock. Hidden tests, hints, feedback and the solution open when you finish the interview.
-- **AI-native coding rounds.** Pick the AI-native coding subject for a small Python codebase with a file tree, data files, tests, a terminal, Run main and Run tests, an interviewer, and an AI assistant that sees every file. The task comes in three parts: fix, extend, then a harder follow-up. Finishing runs your code against the original tests plus hidden ones, and feedback covers how you used the assistant.
+- **AI-native coding rounds.** Pick the AI-native coding subject for a small Python codebase with a file tree, data files, tests, a terminal, Run main and Run tests, an interviewer, and an AI assistant that sees every file. The assistant has two modes, like CoderPad: Ask answers and suggests, and Edit proposes changes that you see as a diff per file and accept or reject. The task comes in three parts: fix, extend, then a harder follow-up. Finishing runs your code against the original tests plus hidden ones, and feedback covers how you used the assistant.
 - **Write and draw.** Answers take text, equations you type and see typeset, and drawings on a whiteboard. Grading, chat and analysis see all three.
 - **Analyze** draws your own solution as an interactive picture. Python runs are recorded line by line, so the picture shows what your code really did. For other work the model draws it from your answer.
 - **Ask** opens a chat beside other problems. It sees your current work.
@@ -68,7 +68,7 @@ A draft that fails is sent back with the reason, up to three tries. One model wr
 - Code, SQL and number problems need macOS. Elsewhere only written and interface problems work.
 - Functions use numbers, strings, booleans and nested lists. Trees, graphs and class designs are expressed with those.
 - There is no circuit or Verilog simulator.
-- Codebase problems are Python only, run with `unittest` from the standard library. There is no shell, no package installs and no apply button for assistant code, so you copy what you want to keep.
+- Codebase problems are Python only, run with `unittest` from the standard library. There is no shell and no package installs. Assistant edits replace whole files, and it cannot delete files.
 - Links must be readable pages. PDFs and pages that need a browser or a sign-in have to be pasted as text.
 
 ## Built with

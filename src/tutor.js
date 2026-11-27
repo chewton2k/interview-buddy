@@ -1,7 +1,8 @@
-import { addProblem, data, obj, str, tracked } from './generate.js';
+import { randomUUID } from 'node:crypto';
+import { addProblem, data, obj, PROJECT_LIMIT, said, str, tracked } from './generate.js';
 import { dropLinks, findLinks } from './link.js';
 import { ask, ProviderError } from './providers.js';
-import { LANGUAGES, runCode } from './sandbox.js';
+import { LANGUAGES, plainPath, runCode } from './sandbox.js';
 import { checkDrawing, Invalid, readSet, chosen, updateProblem } from './store.js';
 
 const RUNS = ['code', 'sql'];
@@ -28,10 +29,15 @@ Be direct and concrete, refer to what they actually wrote, and keep to what was 
 const INTERVIEWER = `You are the interviewer in a live technical interview in a shared coding pad. You see the candidate's code and what their last run printed. Answer their last message in the transcript.
 Behave like a good human interviewer. Keep replies under 90 words. Ask at most one question at a time. Answer clarifying questions about the problem plainly. When they describe an approach, probe its edge cases and its time and space cost before they build it. When they are stuck or ask for help, give the smallest useful nudge. When their code works, ask for tests they would add, then a follow-up that changes a constraint. Never write the solution, name the full algorithm outright or fix their code for them. If they ask for the solution, say it opens when they finish the interview.`;
 const PROJECT_INTERVIEWER = `You are the interviewer in a live AI-native coding interview. The candidate works in a multi-file codebase in a shared IDE with an AI assistant they are expected to use, and you see their files, what their last run printed and their recent messages to the assistant. Answer their last message in the transcript.
-Behave like a good human interviewer. Keep replies under 90 words. Ask at most one question at a time. Answer clarifying questions about the task plainly. Ask them to explain existing code and any code the assistant wrote before they rely on it, how they verified a change, which tests or edge cases they would add, and the runtime or trade-offs of their approach. When a part works, move them on to the next part of the statement. If they paste assistant output without checking it, ask how they know it is right. Never write the solution, point at the exact bug or fix their code for them. If they ask for the solution, say it opens when they finish the interview.`;
-const ASSISTANT = `You are the AI coding assistant built into the candidate's IDE. You see every file in their project and what their last run printed. Answer their last message in the transcript like a capable coding assistant: explain code, trace bugs, propose changes, and write code or tests when asked. When you change code, give the file path and the whole changed function or block in fenced code. Be concise. Say when you are unsure, and never claim you ran anything.`;
+Behave like a good human interviewer. Keep replies under 90 words. Ask at most one question at a time. Answer clarifying questions about the task plainly. Ask them to explain existing code and any code the assistant wrote before they rely on it, how they verified a change, which tests or edge cases they would add, and the runtime or trade-offs of their approach. When a part works, move them on to the next part of the statement. If they paste or accept assistant output without reading or running it, ask how they know it is right. Never write the solution, point at the exact bug or fix their code for them. If they ask for the solution, say it opens when they finish the interview.`;
+const ASSISTANT = `You are the AI coding assistant built into the candidate's IDE. You see every file in their project and what their last run printed. Answer their last message in the transcript like a capable coding assistant: explain code, trace bugs, propose changes, and write code or tests when asked. Be concise. Say when you are unsure, and never claim you ran anything.`;
 const chatSchema = obj({ reply: str, new_problem: str });
-const assistantSchema = obj({ reply: str });
+const list = (items) => ({ type: 'array', items });
+const MODES = {
+  ask: 'Ask mode: you cannot change files. When you suggest code, give the file path and the whole changed function or block in fenced code.',
+  edit: 'Edit mode: you can change files. Put each file you change or create in edits, with its path as it appears in the project and its complete new text, never a fragment. Leave edits empty when no change is asked for. The candidate sees a diff per file and accepts or rejects it. In reply, say briefly what you changed and why, without repeating the code.',
+};
+const assistantSchema = { ask: obj({ reply: str }), edit: obj({ reply: str, edits: list(obj({ path: str, content: str })) }) };
 
 /** Stores the question and answers it in the background, so leaving the page loses nothing. */
 export async function chat(setId, pid, body) {
@@ -39,6 +45,7 @@ export async function chat(setId, pid, body) {
   const message = need(body.message, 'Your message', 4000).trim();
   // The assistant is its own transcript, so the interviewer and the grader can see how it was used.
   const channel = body.channel === 'assistant' ? 'assistant' : 'chat';
+  const mode = body.mode === 'edit' ? 'edit' : 'ask';
   const [busy, error] = [`${channel}Busy`, `${channel}Error`];
   const question = await updateProblem(setId, pid, (p) => {
     ready(p);
@@ -59,23 +66,25 @@ export async function chat(setId, pid, body) {
     try {
       const { problem } = await find(setId, pid);
       const tutor = await chosen();
-      const transcript = problem[channel].slice(-20).map(({ role, text }) => ({ role, text }));
+      const transcript = problem[channel].slice(-20).map(said);
       const live = !problem.session?.endedAt;
       const r =
         channel === 'assistant'
-          ? await ask({ ...tutor, prompt: `${ASSISTANT} Use Markdown.\n${data({ project: now.code, last_run: now.outcome, transcript })}`, schema: assistantSchema, signal: job.signal })
+          ? await ask({ ...tutor, prompt: `${ASSISTANT} ${MODES[mode]} Use Markdown.\n${data({ project: now.code, last_run: now.outcome, transcript })}`, schema: assistantSchema[mode], signal: job.signal })
           : await ask({
               ...tutor,
               prompt: `${problem.kind === 'project' && live ? PROJECT_INTERVIEWER : RUNS.includes(problem.kind) && live ? INTERVIEWER : PARTNER} Use Markdown, with $...$ for math and fenced code where it helps. Never write a dollar sign for money.
 new_problem is an empty string unless the candidate asks you to make a new practice problem, for example from a link, an idea or as a variation of this one. Then describe the problem to write in a few self-contained sentences, with no links, and say in reply that it is being made. The app opens links the candidate pasted.
-${data({ problem: { title: problem.title, subject: problem.subject, ...known(problem.body) }, candidate_work: worded(now), clock: problem.session ?? undefined, ai_assistant_transcript: problem.assistant?.slice(-10).map(({ role, text }) => ({ role, text })), transcript })}${seen(now.drawing)}`,
+${data({ problem: { title: problem.title, subject: problem.subject, ...known(problem.body) }, candidate_work: worded(now), clock: problem.session ?? undefined, ai_assistant_transcript: problem.assistant?.slice(-10).map(said), transcript })}${seen(now.drawing)}`,
               images: now.drawing ? [now.drawing.png] : [],
               schema: chatSchema,
               signal: job.signal,
             });
       // Links come from the candidate's own words only. A page or a reply must not be able to choose what gets opened.
       const problemId = r.new_problem?.trim() ? await addProblem(setId, { request: question, guidance: dropLinks(r.new_problem), subject: '', links: findLinks(question) }) : undefined;
-      await updateProblem(setId, pid, (p) => void Object.assign(p, { [channel]: [...p[channel], { role: 'assistant', text: r.reply, problemId }], [busy]: false }));
+      // Edits only become files when the candidate accepts them, and only plain paths outside the hidden tests get that far.
+      const edits = (r.edits ?? []).filter((e) => plainPath(e.path) && !e.path.startsWith('hidden/') && typeof e.content === 'string' && e.content.length <= PROJECT_LIMIT).slice(0, 12).map((e) => ({ id: randomUUID(), path: e.path, content: e.content, status: 'pending' }));
+      await updateProblem(setId, pid, (p) => void Object.assign(p, { [channel]: [...p[channel], { role: 'assistant', text: r.reply, problemId, ...(edits.length && { edits }) }], [busy]: false }));
     } catch (e) {
       if (job.signal.aborted) return;
       await updateProblem(setId, pid, (p) => void Object.assign(p, { [busy]: false, [error]: e.message }));
