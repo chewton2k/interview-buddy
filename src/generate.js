@@ -3,18 +3,18 @@ import { findQuote } from './answers.js';
 import { badSignature, close, fits, same, starter } from './harness.js';
 import { fetchPage } from './link.js';
 import { ask, ProviderError } from './providers.js';
-import { runCode, tools } from './sandbox.js';
+import { checkFiles, runCode, runProject, tools } from './sandbox.js';
 import { createSetFile, ensureSet, Invalid, listSets, readSet, chosen, updateProblem, updateSet } from './store.js';
 
 export const GROUPS = {
-  Engineering: ['Coding', 'System design', 'Frontend', 'SQL and data', 'Machine learning', 'Circuit design', 'Mechanical'],
+  Engineering: ['Coding', 'AI-native coding', 'System design', 'Frontend', 'SQL and data', 'Machine learning', 'Circuit design', 'Mechanical'],
   'Quant and science': ['Quant', 'Math', 'Statistics', 'Physics', 'Chemistry', 'Biology'],
   'Design and product': ['UI/UX design', 'Product sense'],
   'Business and people': ['Case study', 'Finance', 'Behavioral'],
 };
 export const SUBJECTS = Object.values(GROUPS).flat();
-const KINDS = ['code', 'numeric', 'written', 'ui', 'sql'];
-const KIND_GUIDE = 'kind is "code" for a function the candidate writes and runs against tests in Python, JavaScript or C++, "sql" for one SQLite query run against several datasets, "ui" for an interface built in HTML, CSS and JavaScript with a preview and checks, "numeric" for one number as the answer, and "written" for design, derivation, explanation, critique, a case or a story that a rubric grades. In written problems the candidate can write, typeset equations and draw diagrams or wireframes.';
+const KINDS = ['code', 'project', 'numeric', 'written', 'ui', 'sql'];
+const KIND_GUIDE = 'kind is "code" for a function the candidate writes and runs against tests in Python, JavaScript or C++, "project" for an AI-native coding round where the candidate works in a small existing multi-file Python codebase with data files, tests and an AI assistant, and fixes, extends and verifies it, "sql" for one SQLite query run against several datasets, "ui" for an interface built in HTML, CSS and JavaScript with a preview and checks, "numeric" for one number as the answer, and "written" for design, derivation, explanation, critique, a case or a story that a rubric grades. In written problems the candidate can write, typeset equations and draw diagrams or wireframes.';
 export const LEVELS = ['Intern', 'New grad', 'Mid', 'Senior'];
 const TYPES = 'int, float, string, bool, and lists of them written int[], string[][] and so on, up to three levels deep';
 const MAX_TRIES = 3;
@@ -30,6 +30,7 @@ export const problemSchema = {
   code: obj({ ...common, function_name: str, params: list(obj({ name: str, type: str })), returns: str, compare: oneOf('exact', 'unordered'), examples: list(obj({ args_json: str, expected_json: str, explanation: str })), case_args_json: list(str), solution_python: str, brute_python: str }),
   numeric: obj({ ...common, figure_svg: str, answer: { type: 'number' }, unit: str, tolerance: { type: 'number' }, solver_python: str }),
   written: obj({ ...common, figure_svg: str }),
+  project: obj({ ...common, files: list(obj({ path: str, content: str })), hidden_tests: str, solution_files: list(obj({ path: str, content: str })) }),
   ui: obj({ ...common, starter_html: str, reference_html: str, checks: list(obj({ name: str, js: str })) }),
   sql: obj({ ...common, setup_sql: str, datasets: list(str), ordered: { type: 'boolean' }, reference_sql: str, second_sql: str }),
 };
@@ -65,7 +66,7 @@ ${data({ request: p.request, guidance: p.guidance, level: intake.level, ...(inta
 const covers = ({ subjects, count }) => subjects.length <= count;
 const planPrompt = (intake, existing) => `Plan a practice set of exactly ${intake.count} problems for the interview described below.
 ${existing.length ? 'They join the problems in "existing". Do not repeat the task, method or quote of any of those.\n' : ''}${covers(intake) ? 'Use every listed subject at least once and no other subject.' : 'Use only the listed subjects.'} Match the level, the company's domain and what the rounds test. Order from easier to harder, and vary the topics.
-${KIND_GUIDE} Prefer code for coding and machine learning, sql for SQL, ui for frontend, numeric for quant, math, statistics, physics, chemistry, mechanics, circuits and finance, and written for system design, UI/UX, product, case, biology and behavioral, unless the rounds suggest otherwise. Behavioral problems ask for a real story and are graded on situation, actions, result and reflection.
+${KIND_GUIDE} Prefer project for AI-native coding and whenever the rounds mention an AI assistant, an existing codebase or several files, code for coding and machine learning, sql for SQL, ui for frontend, numeric for quant, math, statistics, physics, chemistry, mechanics, circuits and finance, and written for system design, UI/UX, product, case, biology and behavioral, unless the rounds suggest otherwise. Behavioral problems ask for a real story and are graded on situation, actions, result and reflection.
 quote must be 3 to 15 consecutive words copied exactly from "posting" or "rounds" that the problem trains. Prefer a different quote for each problem. Use an empty string only when nothing fits.
 topic is one sentence telling the author what to write. title is at most 8 words in sentence case.
 ${data(existing.length ? { ...intake, existing: existing.map((p) => ({ title: p.title, subject: p.subject, topic: p.topic, quote: p.quote })) } : intake)}`;
@@ -78,6 +79,13 @@ case_args_json holds 10 to 14 more inputs, inputs only. Include the smallest and
 The answer must be unique. Use compare "unordered" only when the statement says the result may be in any order.
 solution_python is an efficient solution. brute_python solves the same task by a different, simpler method. Both define function_name with exactly those parameters, use only the standard library, never mutate shared state and never print. Both will be executed and must agree on every input.
 State constraints and the expected time complexity in the statement. Do not repeat the examples in the statement.`,
+  project: `kind: project. This is a 45 to 60 minute AI-native coding round. The candidate works in an existing codebase with an AI assistant beside the editor, runs main.py and the tests, and talks it through with the interviewer, as in a real multi-file IDE.
+files is a small, realistic Python 3 project that the company could own, such as a service, a library, a data pipeline or a command line tool. 6 to 12 files and 250 to 600 lines in all, standard library only. Include README.md describing the project, main.py that runs a short demo and prints its result, a package of modules that call each other, one or two data files (CSV or JSON) that the code reads with paths relative to the project root, and tests/test_*.py with 3 to 8 unittest tests. Paths use only letters, digits, underscores, dots, dashes and slashes, and no path starts with a dot.
+The code reads like real team code: sensible names, some docstrings, one or two real bugs that the visible tests or the data expose, and at least one feature that is missing or unfinished. No comment points at a bug or says TODO for the task.
+statement sets the scene in two sentences, then gives three parts that build on each other, each starting with **Part 1**, **Part 2** and **Part 3**. Part 1: find and fix why something is wrong, without saying where. Part 2: add a feature inside the existing structure. Part 3: a harder extension, such as a new requirement, scale, a contract change or messy data, ending with a question on runtime or trade-offs. Mention the commands: Run main runs main.py and Run tests runs tests/.
+hidden_tests is the full text of one unittest file the candidate never sees, run from the project root with the project importable as in tests/. It holds 6 to 12 tests covering all three parts and their edge cases.
+solution_files holds the complete new text of every file the reference solution changes or adds, never a file under tests/. With those files every test in tests/ and hidden_tests passes, main.py exits cleanly, and on the starting files at least two tests fail.
+The rubric covers, in order: reading and explaining the existing code, a correct and maintainable change, verification with tests and edge cases, use of the AI assistant with its output checked rather than pasted blindly, and the runtime or trade-off answer.`,
   numeric: `kind: numeric. The answer is one finite real number in the stated unit (empty string for a pure number). Say in the statement which unit, and how many significant figures are needed. tolerance is the relative error to accept, between 0.0001 and 0.05.
 solver_python defines solve() with no parameters and returns the number, computed from the givens in the statement without using your stated answer. Standard library only. It will be executed and must match answer.`,
   written: `kind: written. Ask for a design, derivation or explanation that can be answered in 10 to 20 minutes of writing or drawing. The candidate has a drawing canvas, so ask for a diagram where an interviewer would. No number or code is checked, so the rubric decides.`,
@@ -168,6 +176,42 @@ async function verifySql(d) {
   return { signature: QUERY, compare, exampleCount: 1, cases: cases.map((c, i) => ({ args: c.args, expected: a.results[i].actual })), solutionCode: d.reference_sql };
 }
 
+export const PROJECT_LIMIT = 80000;
+const mapOf = (list, what) => {
+  const map = {};
+  for (const { path, content } of list) {
+    if (path in map) throw new Rejected(`${what} lists ${path} twice`);
+    map[path] = content;
+  }
+  try {
+    return checkFiles(map, PROJECT_LIMIT);
+  } catch (e) {
+    throw new Rejected(`${what}: ${e.message}`);
+  }
+};
+const failing = (r) => r.tests.filter((t) => t.status !== 'pass').map((t) => t.id);
+async function verifyProject(d) {
+  const files = mapOf(d.files, 'files');
+  const changes = mapOf(d.solution_files, 'solution_files');
+  const paths = Object.keys(files);
+  if (!files['main.py']) throw new Rejected('files has no main.py');
+  if (!paths.some((p) => /^tests\/test[^/]*\.py$/.test(p))) throw new Rejected('files has no tests/test_*.py');
+  if (paths.some((p) => p.startsWith('hidden/'))) throw new Rejected('files must not use the hidden/ folder');
+  if (Object.keys(changes).some((p) => p.startsWith('tests/'))) throw new Rejected('solution_files must not change tests/');
+  const hidden = { 'hidden/test_hidden.py': d.hidden_tests };
+  const solved = { ...files, ...changes };
+  const all = ['tests', 'hidden'];
+  const [before, after, main] = await Promise.all([runProject({ files: { ...files, ...hidden }, folders: all }), runProject({ files: { ...solved, ...hidden }, folders: all }), runProject({ files: solved })]);
+  if (after.blocked) throw new ProviderError('missing', after.stderr);
+  const tail = (r) => `${r.note} ${r.stderr.slice(-600)}`.trim();
+  if (after.failed || !after.tests.length || failing(after).length) throw new Rejected(`with solution_files these tests do not pass: ${failing(after).join(', ') || 'none ran'}. ${tail(after)}`);
+  if (after.tests.length < 8) throw new Rejected(`only ${after.tests.length} tests ran, at least 8 are needed across tests/ and hidden_tests`);
+  if (failing(before).length < 2) throw new Rejected('on the starting files fewer than two tests fail, so there is nothing to fix');
+  if (main.failed) throw new Rejected(`main.py fails with solution_files: ${tail(main)}`);
+  const listing = (map) => Object.entries(map).map(([p, t]) => `### ${p}\n\`\`\`\n${t}\n\`\`\``).join('\n\n');
+  return { files, hiddenTests: d.hidden_tests, solutionFiles: changes, solutionCode: listing(changes) };
+}
+
 const UI_LIMIT = 60000;
 function verifyUi(d) {
   if (d.checks.length < 3) throw new Rejected('fewer than 3 checks were given');
@@ -201,6 +245,7 @@ async function verify(kind, d) {
   if (kind === 'numeric') return { ...base, ...(await verifyNumeric(d)) };
   if (kind === 'sql') return { ...base, ...(await verifySql(d)) };
   if (kind === 'ui') return { ...base, ...verifyUi(d) };
+  if (kind === 'project') return { ...base, ...(await verifyProject(d)) };
   return base;
 }
 
@@ -397,6 +442,7 @@ export async function recoverInterrupted() {
       for (const p of s.problems) if (p.status === 'queued' || p.status === 'writing') Object.assign(p, { status: 'failed', step: null, error: message });
       for (const p of s.problems) {
         if (p.chatBusy) Object.assign(p, { chatBusy: false, chatError: message });
+        if (p.assistantBusy) Object.assign(p, { assistantBusy: false, assistantError: message });
         if (p.visual?.status === 'working') Object.assign(p.visual, { status: p.visual.html ? 'ready' : 'failed', step: null, error: message });
       }
     });
@@ -406,8 +452,8 @@ export async function recoverInterrupted() {
 export async function grade({ problem, answer, outcome, drawing, signal }) {
   const choice = await chosen();
   const { statement, rubric, solutionText, solutionCode, answer: correct, unit } = problem.body;
-  const prompt = `Grade this interview answer as a fair, specific interviewer. Give one entry in points for each of the ${rubric.length} rubric points, in order. mark is met, partial or missed. note is one or two sentences addressed to the candidate that point at what they wrote, and is empty when the point is fully met. summary is two sentences with the single most useful next step. Grade only what is written. When there is an interview transcript, let summary also say how well they communicated, such as clarifying, explaining the approach and testing. Use $...$ for math.
-${data({ statement, rubric, reference: solutionCode ?? solutionText, correct_answer: correct === undefined ? undefined : `${correct} ${unit}`, outcome, candidate_answer: answer, candidate_drawing: drawing?.outline, interview_transcript: problem.chat?.slice(-30).map(({ role, text }) => ({ role: role === 'user' ? 'candidate' : 'interviewer', text })), clock: problem.session ?? undefined })}${drawing ? '\nThe attached image is the drawing that is part of their answer. Judge what it shows.' : ''}`;
+  const prompt = `Grade this interview answer as a fair, specific interviewer. Give one entry in points for each of the ${rubric.length} rubric points, in order. mark is met, partial or missed. note is one or two sentences addressed to the candidate that point at what they wrote, and is empty when the point is fully met. summary is two sentences with the single most useful next step. Grade only what is written. When there is an interview transcript, let summary also say how well they communicated, such as clarifying, explaining the approach and testing. When there is an AI assistant transcript, judge what they asked it and whether they checked its answers before using them. Use $...$ for math.
+${data({ statement, rubric, reference: solutionCode ?? solutionText, correct_answer: correct === undefined ? undefined : `${correct} ${unit}`, outcome, candidate_answer: answer, candidate_drawing: drawing?.outline, interview_transcript: problem.chat?.slice(-30).map(({ role, text }) => ({ role: role === 'user' ? 'candidate' : 'interviewer', text })), ai_assistant_transcript: problem.assistant?.slice(-30).map(({ role, text }) => ({ role: role === 'user' ? 'candidate' : 'assistant', text })), clock: problem.session ?? undefined })}${drawing ? '\nThe attached image is the drawing that is part of their answer. Judge what it shows.' : ''}`;
   const g = await ask({ ...choice, prompt, schema: gradeSchema, images: drawing ? [drawing.png] : [], signal });
   if (g.points.length !== rubric.length) throw new ProviderError('badjson', 'The grader skipped part of the rubric. Try again.');
   const score = g.points.reduce((s, p) => s + (p.mark === 'met' ? 1 : p.mark === 'partial' ? 0.5 : 0), 0) / rubric.length;

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { track } from './providers.js';
+import { Invalid } from './store.js';
 import { badSignature, build, fits, program, same } from './harness.js';
 
 const exec = promisify(execFile);
@@ -115,7 +116,10 @@ async function execute(plan, language, { timeout, sandbox }) {
   const refused = (r) => r.spawnError ?? (/^sandbox-exec:/.test(r.stderr) ? r.stderr.trim() : null);
   const tidy = (text) => text.replaceAll(`${dir}/`, '');
   try {
-    await Promise.all(Object.entries(plan.files).map(([f, text]) => fs.writeFile(path.join(dir, f), text)));
+    for (const [f, text] of Object.entries(plan.files)) {
+      await fs.mkdir(path.dirname(path.join(dir, f)), { recursive: true });
+      await fs.writeFile(path.join(dir, f), text);
+    }
     const reads = tool.prefix ? [tool.prefix, path.dirname(tool.bin)] : [];
     if (plan.compile) {
       const c = await launch(dir, [tool.bin, ...plan.compile.slice(1)], { fork: true, timeout: 30000, reads, sandbox });
@@ -139,6 +143,68 @@ export const runProgram = ({ language, code, data = '', timeout = 10000, sandbox
     const died = r.signal ?? (r.code > 128 ? `signal ${r.code - 128}` : null);
     const note = WHY[r.reason] ?? (died ? `Crashed (${died})` : r.code ? `Exited with code ${r.code}` : `Finished in ${Math.round(r.ms)} ms`);
     return { stdout: r.stdout, stderr: r.stderr, failed: Boolean(r.reason || died || r.code), note };
+  });
+
+const PATH = /^[A-Za-z0-9_][A-Za-z0-9_.-]*(\/[A-Za-z0-9_][A-Za-z0-9_.-]*){0,4}$/;
+/** Paths are written into the run folder outside the sandbox, so only plain relative ones get through. */
+export function checkFiles(files, max) {
+  if (!files || typeof files !== 'object' || Array.isArray(files)) throw new Invalid('Files must be a map of paths to text');
+  const entries = Object.entries(files);
+  if (!entries.length || entries.length > 40) throw new Invalid('A project has 1 to 40 files');
+  let size = 0;
+  for (const [p, text] of entries) {
+    if (p.length > 120 || !PATH.test(p)) throw new Invalid(`${p.slice(0, 120)} is not a plain relative path, such as tests/test_cart.py`);
+    if (typeof text !== 'string') throw new Invalid(`${p} must be text`);
+    size += text.length;
+  }
+  const dirs = new Set(entries.flatMap(([p]) => p.split('/').slice(0, -1).map((_, i, a) => a.slice(0, i + 1).join('/'))));
+  const clash = entries.find(([p]) => dirs.has(p));
+  if (clash) throw new Invalid(`${clash[0]} is both a file and a folder`);
+  if (size > max) throw new Invalid(`The files are longer than ${max.toLocaleString('en-US')} characters together`);
+  return Object.fromEntries(entries);
+}
+
+const RUNNER = `import json, os, sys, unittest
+class Result(unittest.TextTestResult):
+    def mark(self, test, status):
+        os.write(3, (json.dumps({"test": test.id(), "status": status}) + "\\n").encode())
+    def addSuccess(self, test):
+        super().addSuccess(test); self.mark(test, "pass")
+    def addFailure(self, test, err):
+        super().addFailure(test, err); self.mark(test, "fail")
+    def addError(self, test, err):
+        super().addError(test, err); self.mark(test, "error")
+    def addSubTest(self, test, sub, err):
+        super().addSubTest(test, sub, err)
+        if err is not None: self.mark(test, "fail")
+    def addExpectedFailure(self, test, err):
+        super().addExpectedFailure(test, err); self.mark(test, "pass")
+    def addUnexpectedSuccess(self, test):
+        super().addUnexpectedSuccess(test); self.mark(test, "fail")
+suite = unittest.TestSuite()
+for folder in sys.argv[1:]:
+    if os.path.isdir(folder):
+        suite.addTests(unittest.TestLoader().discover(folder, pattern="test*.py", top_level_dir=folder))
+unittest.TextTestRunner(verbosity=2, resultclass=Result).run(suite)
+`;
+const RANK = { pass: 0, fail: 1, error: 2 };
+
+/** Runs a Python project: main.py, or the unittest files in \`folders\`. Tests come back worst status first per test id. */
+export const runProject = ({ files, folders, timeout = 10000, sandbox = '/usr/bin/sandbox-exec' }) =>
+  slot(async () => {
+    const plan = folders ? { files: { ...files, '.ib_tests.py': RUNNER }, run: ['python3', '-B', '-u', '.ib_tests.py', ...folders] } : { files, run: ['python3', '-B', '-u', 'main.py'] };
+    const { blocked, r } = await execute(plan, 'python', { timeout, sandbox });
+    if (blocked) return { stdout: '', stderr: blocked, failed: true, note: 'Not run', blocked: true, tests: [] };
+    const tests = new Map();
+    for (const l of r.channel.split('\n').filter(Boolean)) {
+      try {
+        const { test, status } = JSON.parse(l);
+        if (!tests.has(test) || RANK[status] > RANK[tests.get(test)]) tests.set(test, status);
+      } catch {}
+    }
+    const died = r.signal ?? (r.code > 128 ? `signal ${r.code - 128}` : null);
+    const note = WHY[r.reason] ?? (died ? `Crashed (${died})` : folders ? '' : r.code ? `Exited with code ${r.code}` : `Finished in ${Math.round(r.ms)} ms`);
+    return { stdout: r.stdout, stderr: r.stderr, failed: Boolean(r.reason || died || (!folders && r.code)), note, tests: [...tests].map(([id, status]) => ({ id, status })) };
   });
 
 async function run({ language, code, signature, cases, compare = 'exact', timeout = 10000, trace = false, sandbox = '/usr/bin/sandbox-exec' }) {

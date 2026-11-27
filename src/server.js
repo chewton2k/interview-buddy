@@ -4,11 +4,11 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkNumber } from './answers.js';
-import { addMore, addProblem, checkRequest, createSet, grade, GROUPS, LEVELS, personalSet, retryProblem, retrySet, stopSet } from './generate.js';
+import { addMore, addProblem, checkRequest, createSet, grade, GROUPS, LEVELS, personalSet, PROJECT_LIMIT, retryProblem, retrySet, stopSet } from './generate.js';
 import { fits, same, starter } from './harness.js';
 import { findLinks } from './link.js';
 import { ping, ProviderError, providerStatus } from './providers.js';
-import { LANGUAGES, runCode, runProgram, selfTest, tools } from './sandbox.js';
+import { checkFiles, LANGUAGES, runCode, runProgram, runProject, selfTest, tools } from './sandbox.js';
 import { checkDrawing, checkSettings, deleteSet, Invalid, listSets, NotFound, readDrawing, readSet, readSettings, saveDrawing, saveSettings, updateProblem } from './store.js';
 import { analyze, chat, repair, visualOf } from './tutor.js';
 
@@ -96,6 +96,24 @@ async function runFor(setId, pid, body, examplesOnly) {
   const tests = [...given, ...own];
   const r = await runCode({ language, code: needText(body.code, 'Code'), signature, cases: tests, compare });
   return { ...r, tests };
+}
+
+const HIDDEN = 'hidden/test_hidden.py';
+const tested = (r) => ({ ...r, passed: r.tests.filter((t) => t.status === 'pass').length });
+/** Main, the visible tests as the user has them, or, on finish, their code against the original tests plus the hidden ones. */
+async function runCodebase(setId, pid, body, mode) {
+  const problem = await readyProblem(setId, pid);
+  kindOnly(problem, 'project');
+  const files = checkFiles(body.files, PROJECT_LIMIT * 2);
+  if (mode === 'main') return runProject({ files });
+  if (mode === 'tests') return tested(await runProject({ files, folders: ['tests'] }));
+  const given = Object.fromEntries(Object.entries(problem.body.files).filter(([p]) => p.startsWith('tests/')));
+  const r = tested(await runProject({ files: { ...files, ...given, [HIDDEN]: problem.body.hiddenTests }, folders: ['tests', 'hidden'] }));
+  // Solved means every original and hidden test passed. Tests the user added are reported but not required.
+  const modules = new Set(['test_hidden', ...Object.keys(given).map((p) => path.basename(p, '.py'))]);
+  const module = (id) => (id.startsWith('unittest.loader.') ? id.split('.').at(-1) : id.split('.')[0]);
+  const theirs = r.tests.filter((t) => modules.has(module(t.id)));
+  return { ...r, solved: !r.blocked && theirs.length > 0 && theirs.every((t) => t.status === 'pass') };
 }
 
 const TESTS_LIMIT = 50;
@@ -188,6 +206,8 @@ const routes = [
     if (EDITORS.includes(body.language)) draft.language = body.language;
     for (const l of EDITORS) if (body.code?.[l] !== undefined) (draft.code ??= {})[l] = needText(body.code[l], 'Code');
     for (const k of ['answer', 'working']) if (body[k] !== undefined) draft[k] = needText(body[k], 'Your answer');
+    if (body.files !== undefined) draft.files = checkFiles(body.files, PROJECT_LIMIT * 2);
+    if (body.open !== undefined) draft.open = needText(body.open, 'Open file', 120);
     await updateProblem(id, pid, (p) => void (p.draft = draft));
     return {};
   }],
@@ -198,6 +218,12 @@ const routes = [
     return runProgram({ language: languageFor(problem, body), code: needText(body.code, 'Code'), data: problem.body.cases[0].args[0] });
   }],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/run$/, ([id, pid], body) => runFor(id, pid, body, true)],
+  ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/project\/(main|tests)$/, ([id, pid, mode], body) => runCodebase(id, pid, body, mode)],
+  ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/project\/submit$/, async ([id, pid], body) => {
+    const r = await runCodebase(id, pid, body, 'submit');
+    await updateProblem(id, pid, advance(r.solved));
+    return r;
+  }],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/tests$/, async ([id, pid], body) => addTest(id, pid, body)],
   ['DELETE', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/tests\/([^/]+)$/, async ([id, pid, tid]) => {
     await updateProblem(id, pid, (p) => {
@@ -209,7 +235,7 @@ const routes = [
   }],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/session$/, async ([id, pid], body) => {
     const problem = await readyProblem(id, pid);
-    kindOnly(problem, 'code', 'sql');
+    kindOnly(problem, 'code', 'sql', 'project');
     if (!['start', 'end', 'clear'].includes(body.action)) throw new Invalid('Choose start, end or clear');
     if (body.action === 'start' && ![30, 45, 60].includes(body.minutes)) throw new Invalid('Choose 30, 45 or 60 minutes');
     await updateProblem(id, pid, (p) => {

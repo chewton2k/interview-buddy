@@ -30,3 +30,22 @@ export const numeric = (over = {}) => ({ ...common, figure_svg: '<svg viewBox="0
 export const written = (over = {}) => ({ ...common, figure_svg: 'not svg', ...over });
 export const sql = (over = {}) => ({ ...common, setup_sql: 'CREATE TABLE t (name TEXT, v REAL);', datasets: ["INSERT INTO t VALUES ('a', 1), ('a', 2);", '', "INSERT INTO t VALUES ('a', 1), ('b', NULL);", "INSERT INTO t VALUES ('x', 1.5);"], ordered: false, reference_sql: 'SELECT name, SUM(v) FROM t GROUP BY name', second_sql: 'SELECT DISTINCT name, (SELECT SUM(v) FROM t u WHERE u.name = t.name) FROM t', ...over });
 export const ui = (over = {}) => ({ ...common, starter_html: '<p>start</p>', reference_html: '<button>Go</button>', checks: [{ name: 'has a button', js: "assert($('button'))" }, { name: 'b', js: 'await wait(1)' }, { name: 'c', js: "await click('button')" }], ...over });
+const tally = 'import json\n\ndef load(path="data/orders.json"):\n    with open(path) as f:\n        return json.load(f)\n\ndef total(orders):\n    return sum(o["qty"] for o in orders)\n';
+const fixed = tally.replace('o["qty"] for', 'o["qty"] * o["price"] for');
+const visible = 'import unittest\nfrom shop.tally import total\n\nclass TestTotal(unittest.TestCase):\n    def test_one(self):\n        self.assertEqual(total([{"qty": 2, "price": 3}]), 6)\n\n    def test_empty(self):\n        self.assertEqual(total([]), 0)\n';
+const hidden = 'import unittest\nfrom shop.tally import load, total\n\nclass TestHidden(unittest.TestCase):\n' + ['a', 'b', 'c', 'd', 'e', 'f'].map((n, i) => `    def test_${n}(self):\n        self.assertEqual(total([{"qty": ${i + 1}, "price": 2}]), ${2 * (i + 1)})\n`).join('\n') + '\n    def test_file(self):\n        self.assertEqual(total(load()), 7)\n';
+export const project = (over = {}) => ({
+  ...common,
+  files: [
+    { path: 'README.md', content: '# Shop\nTotals orders.\n' },
+    { path: 'main.py', content: 'from shop.tally import load, total\nprint(total(load()))\n' },
+    { path: 'shop/__init__.py', content: '' },
+    { path: 'shop/tally.py', content: tally },
+    { path: 'data/orders.json', content: '[{"qty": 1, "price": 5}, {"qty": 2, "price": 1}]' },
+    { path: 'tests/test_tally.py', content: visible },
+  ],
+  hidden_tests: hidden,
+  solution_files: [{ path: 'shop/tally.py', content: fixed }],
+  ...over,
+});
+export const projectFix = fixed;

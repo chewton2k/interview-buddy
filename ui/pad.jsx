@@ -9,7 +9,7 @@ const LANGUAGES = { code: { python: 'Python', javascript: 'JavaScript', cpp: 'C+
 const FILES = { python: 'solution.py', javascript: 'solution.js', cpp: 'solution.cpp', sql: 'query.sql' };
 const INTRO = "I'm your interviewer. Read the instructions, ask me about anything unclear, and talk me through your approach before you write code.";
 
-function Splitter({ name, side, width, onWidth }) {
+export function Splitter({ name, side, width, onWidth }) {
   const [min, max] = [220, 760];
   const set = (w) => onWidth(Math.round(Math.min(max, Math.max(min, w))));
   const drag = (e) => {
@@ -35,8 +35,8 @@ function Splitter({ name, side, width, onWidth }) {
 const pad2 = (n) => String(Math.floor(n)).padStart(2, '0');
 const span = (ms) => `${pad2(ms / 60000)}:${pad2((ms / 1000) % 60)}`;
 
-function Clock({ session, act, busy }) {
-  const [minutes, setMinutes] = useState(45);
+export function Clock({ session, act, busy, start = 45 }) {
+  const [minutes, setMinutes] = useState(start);
   const [now, setNow] = useState(Date.now());
   const running = session?.startedAt && !session.endedAt;
   useEffect(() => {
@@ -87,8 +87,8 @@ function Instructions({ set, problem }) {
   );
 }
 
-const OLDER = 'From an earlier version of your code';
-function Console({ out, busy, note, older }) {
+export const OLDER = 'From an earlier version of your code';
+export function Console({ out, busy, note, older }) {
   if (busy) return <p class="row second"><Icon name="load" /> Running on this computer</p>;
   if (!out) return <p class="second">{note}</p>;
   return (
@@ -202,14 +202,14 @@ function OwnTests({ problem, at, reload }) {
   );
 }
 
-const width = (key, start) => {
+export const width = (key, start) => {
   try {
     return Number(localStorage.getItem(key)) || start;
   } catch {
     return start;
   }
 };
-const remember = (key, value) => {
+export const remember = (key, value) => {
   try {
     localStorage.setItem(key, value);
   } catch {}

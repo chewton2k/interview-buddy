@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { brief, calls, clearCalls, code, intake, numeric, replies, sql, ui, written } from './stub/setup.js';
+import { brief, calls, clearCalls, code, intake, numeric, project, replies, sql, ui, written } from './stub/setup.js';
 import { checkNumber, findQuote, parseNumber } from '../src/answers.js';
 import { addMore, checkIntake, createSet, grade, recoverInterrupted, retryProblem, retrySet, stopSet, SUBJECTS, writeProblem } from '../src/generate.js';
 import { createSetFile, deleteSet, readSet, updateProblem, updateSet } from '../src/store.js';
@@ -280,4 +280,23 @@ test('interface problems need a reference and checks that parse', async () => {
   const b = await tryWrite([write(ui())], brief({ kind: 'ui' }));
   assert.deepEqual([b.checks.length, b.starter, b.solutionCode], [3, '<p>start</p>', '<button>Go</button>']);
   for (const [over, re] of [[{ checks: [] }, /fewer than 3/], [{ checks: [{ name: 'a', js: 'assert(' }, { name: 'b', js: '' }, { name: 'c', js: '' }] }, /does not parse/], [{ reference_html: ' ' }, /full page/]]) await assert.rejects(tryWrite([write(ui(over))], brief({ kind: 'ui' })), re);
+});
+
+test('codebase problems need tests that fail on the starting files and pass on the solution', async () => {
+  const b = await tryWrite([write(project())], brief({ kind: 'project', subject: 'AI-native coding' }));
+  assert.deepEqual(Object.keys(b.files), ['README.md', 'main.py', 'shop/__init__.py', 'shop/tally.py', 'data/orders.json', 'tests/test_tally.py']);
+  assert.deepEqual(Object.keys(b.solutionFiles), ['shop/tally.py']);
+  assert.match(b.solutionCode, /### shop\/tally\.py/);
+  const p = project();
+  const cases = [
+    [{ files: p.files.map((f) => (f.path === 'shop/tally.py' ? p.solution_files[0] : f)) }, /fewer than two tests fail/],
+    [{ solution_files: [{ path: 'shop/tally.py', content: 'def total(o):\n    return 0\n' }] }, /do not pass/],
+    [{ files: [...p.files, { path: '../escape.py', content: '' }] }, /plain relative path/],
+    [{ files: [...p.files, { path: 'shop', content: '' }] }, /both a file and a folder/],
+    [{ files: p.files.filter((f) => f.path !== 'main.py') }, /no main\.py/],
+    [{ files: p.files.filter((f) => !f.path.startsWith('tests/')) }, /no tests\/test_\*\.py/],
+    [{ solution_files: [...p.solution_files, { path: 'tests/test_tally.py', content: '' }] }, /must not change tests/],
+    [{ hidden_tests: 'import unittest\n' }, /at least 8 are needed/],
+  ];
+  for (const [over, re] of cases) await assert.rejects(tryWrite([write(project(over))], brief({ kind: 'project' })), re);
 });

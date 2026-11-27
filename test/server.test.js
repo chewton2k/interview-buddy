@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
-import { brief, calls, clearCalls, code, intake, numeric, replies, sql, ui, written } from './stub/setup.js';
+import { brief, calls, clearCalls, code, intake, numeric, project, projectFix, replies, sql, ui, written } from './stub/setup.js';
 import { createServer } from '../src/server.js';
 
 const server = createServer();
@@ -295,4 +295,49 @@ test('the command starts, answers and points at a running copy', { timeout: 3000
   const h = run('--help');
   assert.equal(await h.done, 0);
   assert.ok(fs.statSync('bin/interview-buddy.js').mode & 0o100);
+});
+
+test('a codebase problem runs main and tests, keeps an assistant transcript and is solved only by the original tests', async () => {
+  replies([
+    { match: 'Plan a', reply: { problems: [brief({ kind: 'project', subject: 'AI-native coding' })] } },
+    { match: 'kind: project.', reply: project() },
+    { match: 'AI coding assistant', reply: { reply: 'Multiply by price.' } },
+    { match: 'AI-native coding interview', reply: { reply: 'How do you know?', new_problem: '' } },
+  ]);
+  clearCalls();
+  const { id } = (await call('POST', '/api/sets', { ...intake, subjects: ['AI-native coding'] })).json;
+  const set = await ready(id);
+  const at = `/api/sets/${id}/problems/${set.problems[0].id}`;
+  const files = set.problems[0].body.files;
+  const fixed = { ...files, 'shop/tally.py': projectFix };
+
+  const main = (await call('POST', `${at}/project/main`, { files })).json;
+  assert.deepEqual([main.stdout, main.failed], ['3\n', false]);
+  const tests = (await call('POST', `${at}/project/tests`, { files })).json;
+  assert.deepEqual([tests.passed, tests.tests.length], [1, 2]);
+  assert.match(tests.stderr, /FAIL: test_one/);
+  assert.equal((await call('POST', `${at}/project/tests`, { files: { ...files, '../x.py': '' } })).status, 400);
+
+  // Weakening the visible tests does not count: the original ones run on finish.
+  const cheat = (await call('POST', `${at}/project/submit`, { files: { ...files, 'tests/test_tally.py': 'import unittest\n' } })).json;
+  assert.equal(cheat.solved, false);
+  const mine = 'import unittest\nclass Mine(unittest.TestCase):\n    def test_no(self):\n        self.fail()\n';
+  const done = (await call('POST', `${at}/project/submit`, { files: { ...fixed, 'tests/test_mine.py': mine } })).json;
+  assert.deepEqual([done.solved, done.passed, done.tests.length], [true, 9, 10]);
+  assert.equal((await ready(id)).problems[0].progress, 'solved');
+
+  await call('POST', `${at}/chat`, { message: 'why is the total wrong?', channel: 'assistant', code: '### shop/tally.py' });
+  for (let i = 0; (await ready(id)).problems[0].assistantBusy && i < 200; i++) await new Promise((r) => setTimeout(r, 20));
+  await call('POST', `${at}/chat`, { message: 'I fixed it', code: '### shop/tally.py' });
+  for (let i = 0; (await ready(id)).problems[0].chatBusy && i < 200; i++) await new Promise((r) => setTimeout(r, 20));
+  const p = (await ready(id)).problems[0];
+  assert.deepEqual(p.assistant.map((m) => m.text), ['why is the total wrong?', 'Multiply by price.']);
+  assert.deepEqual(p.chat.map((m) => m.text), ['I fixed it', 'How do you know?']);
+  const [helper, interviewer] = calls().filter((c) => /AI coding assistant|AI-native coding interview/.test(c.prompt));
+  assert.ok(!helper.prompt.includes('reference_solution') && !helper.prompt.includes('rubric'), 'the assistant must not see the answer');
+  assert.ok(interviewer.prompt.includes('Multiply by price.'), 'the interviewer sees the assistant transcript');
+
+  await call('PUT', `${at}/draft`, { files: fixed, open: 'shop/tally.py' });
+  assert.equal((await ready(id)).problems[0].draft.open, 'shop/tally.py');
+  assert.equal((await call('POST', `${at}/session`, { action: 'start', minutes: 60 })).status, 200);
 });

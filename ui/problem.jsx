@@ -7,6 +7,7 @@ import { Chat } from './chat.jsx';
 import { Editor } from './editor.jsx';
 import { api, Icon, Line, Problem, Prose, useAction, useDebounced, useSet } from './lib.jsx';
 import { Pad } from './pad.jsx';
+import { Project } from './project.jsx';
 import { Feedback, Figure, Source } from './parts.jsx';
 
 const CHECKED = { numeric: 'Answer checked by a solver', written: 'Graded on a rubric', ui: 'Checks run in your browser' };
@@ -183,6 +184,7 @@ export function ProblemPage({ params: [id, pid] }) {
       </div>
     );
   }
+  if (problem.kind === 'project') return <Project set={set} problem={problem} at={at} load={load} />;
   if (problem.kind === 'code' || problem.kind === 'sql') return <Pad set={set} problem={problem} at={at} load={load} />;
   const show = (state) => {
     setAsk(state);

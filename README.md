@@ -1,6 +1,6 @@
 # Interview Buddy
 
-Turns a job posting into practice problems and checks your answers on your own computer. It covers coding, system design, frontend, SQL, machine learning, circuits, quant, math, statistics, physics, chemistry, biology, UI/UX design, product sense, case studies, finance, behavioral interviews and any other subject you name.
+Turns a job posting into practice problems and checks your answers on your own computer. It covers coding, AI-native coding in a multi-file codebase, system design, frontend, SQL, machine learning, circuits, quant, math, statistics, physics, chemistry, biology, UI/UX design, product sense, case studies, finance, behavioral interviews and any other subject you name.
 
 It uses the Claude and ChatGPT sign-ins you already have through the `claude` and `codex` commands. There is no API key and no hosted service.
 
@@ -33,6 +33,7 @@ The command starts a server on `http://localhost:4747` and opens it in your brow
 Choose Claude or Codex and a model in Settings. It is used for everything. Settings also has light and dark mode.
 
 - **A coding pad, not a quiz page.** Run executes your file and prints to a console. You write your own tests, talk to an interviewer who sees your code, and can start a clock. Hidden tests, hints, feedback and the solution open when you finish the interview.
+- **AI-native coding rounds.** Pick the AI-native coding subject for a small Python codebase with a file tree, data files, tests, a terminal, Run main and Run tests, an interviewer, and an AI assistant that sees every file. The task comes in three parts: fix, extend, then a harder follow-up. Finishing runs your code against the original tests plus hidden ones, and feedback covers how you used the assistant.
 - **Write and draw.** Answers take text, equations you type and see typeset, and drawings on a whiteboard. Grading, chat and analysis see all three.
 - **Analyze** draws your own solution as an interactive picture. Python runs are recorded line by line, so the picture shows what your code really did. For other work the model draws it from your answer.
 - **Ask** opens a chat beside other problems. It sees your current work.
@@ -44,6 +45,7 @@ Choose Claude or Codex and a model in Settings. It is used for everything. Setti
 | Kind | Check before you see it | How your answer is judged |
 | --- | --- | --- |
 | Code (Python, JavaScript, C++) | Two different solutions run on every input and must agree with each other and with the examples. Expected outputs come from those runs. | Your code runs against every hidden test when you finish |
+| Codebase (Python) | The hidden and given tests must fail on the starting files and all pass with the reference changes, and main.py must run | Your files run against the original tests and the hidden tests when you finish. Tests you add are shown but not required |
 | SQL (SQLite) | Two different queries must return the same rows on every dataset | Your query runs on every dataset |
 | Interface (HTML, CSS, JavaScript) | Checks must parse. In your browser, checks that fail on the reference solution or pass on the starting page are dropped. | The remaining checks run on your page, each on a fresh load |
 | Number | A separate solver must reach the stated answer | Your number is compared within a tolerance, in the stated unit |
@@ -66,6 +68,7 @@ A draft that fails is sent back with the reason, up to three tries. One model wr
 - Code, SQL and number problems need macOS. Elsewhere only written and interface problems work.
 - Functions use numbers, strings, booleans and nested lists. Trees, graphs and class designs are expressed with those.
 - There is no circuit or Verilog simulator.
+- Codebase problems are Python only, run with `unittest` from the standard library. There is no shell, no package installs and no apply button for assistant code, so you copy what you want to keep.
 - Links must be readable pages. PDFs and pages that need a browser or a sign-in have to be pasted as text.
 
 ## Built with

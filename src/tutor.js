@@ -11,7 +11,7 @@ const need = (v, name, max) => {
   if (typeof v !== 'string' || v.length > max) throw new Invalid(`${name} must be text of at most ${max.toLocaleString('en-US')} characters`);
   return v;
 };
-const work = (b) => ({ language: need(b.language, 'Language', 20), code: need(b.code, 'Code', 100000), answer: need(b.answer, 'Answer', 1000), working: need(b.working, 'Your working', 100000), outcome: need(b.outcome, 'Outcome', 6000), drawing: checkDrawing(b.drawing) });
+const work = (b) => ({ language: need(b.language, 'Language', 20), code: need(b.code, 'Code', 200000), answer: need(b.answer, 'Answer', 1000), working: need(b.working, 'Your working', 100000), outcome: need(b.outcome, 'Outcome', 6000), drawing: checkDrawing(b.drawing) });
 const seen = (drawing) => (drawing ? '\nThe attached image is the candidate\'s drawing, which is part of their work.' : '');
 const worded = ({ drawing, ...rest }) => ({ ...rest, drawing: drawing?.outline });
 const ready = (p) => {
@@ -27,40 +27,58 @@ const PARTNER = `You are the candidate's interview partner for one practice prob
 Be direct and concrete, refer to what they actually wrote, and keep to what was asked. Nudge rather than hand over the full solution unless they ask for it.`;
 const INTERVIEWER = `You are the interviewer in a live technical interview in a shared coding pad. You see the candidate's code and what their last run printed. Answer their last message in the transcript.
 Behave like a good human interviewer. Keep replies under 90 words. Ask at most one question at a time. Answer clarifying questions about the problem plainly. When they describe an approach, probe its edge cases and its time and space cost before they build it. When they are stuck or ask for help, give the smallest useful nudge. When their code works, ask for tests they would add, then a follow-up that changes a constraint. Never write the solution, name the full algorithm outright or fix their code for them. If they ask for the solution, say it opens when they finish the interview.`;
+const PROJECT_INTERVIEWER = `You are the interviewer in a live AI-native coding interview. The candidate works in a multi-file codebase in a shared IDE with an AI assistant they are expected to use, and you see their files, what their last run printed and their recent messages to the assistant. Answer their last message in the transcript.
+Behave like a good human interviewer. Keep replies under 90 words. Ask at most one question at a time. Answer clarifying questions about the task plainly. Ask them to explain existing code and any code the assistant wrote before they rely on it, how they verified a change, which tests or edge cases they would add, and the runtime or trade-offs of their approach. When a part works, move them on to the next part of the statement. If they paste assistant output without checking it, ask how they know it is right. Never write the solution, point at the exact bug or fix their code for them. If they ask for the solution, say it opens when they finish the interview.`;
+const ASSISTANT = `You are the AI coding assistant built into the candidate's IDE. You see every file in their project and what their last run printed. Answer their last message in the transcript like a capable coding assistant: explain code, trace bugs, propose changes, and write code or tests when asked. When you change code, give the file path and the whole changed function or block in fenced code. Be concise. Say when you are unsure, and never claim you ran anything.`;
 const chatSchema = obj({ reply: str, new_problem: str });
+const assistantSchema = obj({ reply: str });
 
 /** Stores the question and answers it in the background, so leaving the page loses nothing. */
 export async function chat(setId, pid, body) {
   const now = work(body);
   const message = need(body.message, 'Your message', 4000).trim();
+  // The assistant is its own transcript, so the interviewer and the grader can see how it was used.
+  const channel = body.channel === 'assistant' ? 'assistant' : 'chat';
+  const [busy, error] = [`${channel}Busy`, `${channel}Error`];
   const question = await updateProblem(setId, pid, (p) => {
     ready(p);
-    if (p.chatBusy) throw new Invalid('Wait for the reply first');
-    p.chat ??= [];
-    const last = p.chat.at(-1);
+    if (channel === 'assistant' && p.kind !== 'project') throw new Invalid('This problem has no AI assistant');
+    if (p[busy]) throw new Invalid('Wait for the reply first');
+    p[channel] ??= [];
+    const last = p[channel].at(-1);
     if (body.retry) {
       if (last?.role !== 'user') throw new Invalid('There is nothing to send again');
     } else {
       if (!message) throw new Invalid('Write a message first');
-      p.chat = [...p.chat, { role: 'user', text: message }].slice(-100);
+      p[channel] = [...p[channel], { role: 'user', text: message }].slice(-100);
     }
-    Object.assign(p, { chatBusy: true, chatError: '' });
-    return p.chat.at(-1).text;
+    Object.assign(p, { [busy]: true, [error]: '' });
+    return p[channel].at(-1).text;
   });
   tracked(setId, async (job) => {
     try {
       const { problem } = await find(setId, pid);
       const tutor = await chosen();
-      const prompt = `${RUNS.includes(problem.kind) && !problem.session?.endedAt ? INTERVIEWER : PARTNER} Use Markdown, with $...$ for math and fenced code where it helps. Never write a dollar sign for money.
+      const transcript = problem[channel].slice(-20).map(({ role, text }) => ({ role, text }));
+      const live = !problem.session?.endedAt;
+      const r =
+        channel === 'assistant'
+          ? await ask({ ...tutor, prompt: `${ASSISTANT} Use Markdown.\n${data({ project: now.code, last_run: now.outcome, transcript })}`, schema: assistantSchema, signal: job.signal })
+          : await ask({
+              ...tutor,
+              prompt: `${problem.kind === 'project' && live ? PROJECT_INTERVIEWER : RUNS.includes(problem.kind) && live ? INTERVIEWER : PARTNER} Use Markdown, with $...$ for math and fenced code where it helps. Never write a dollar sign for money.
 new_problem is an empty string unless the candidate asks you to make a new practice problem, for example from a link, an idea or as a variation of this one. Then describe the problem to write in a few self-contained sentences, with no links, and say in reply that it is being made. The app opens links the candidate pasted.
-${data({ problem: { title: problem.title, subject: problem.subject, ...known(problem.body) }, candidate_work: worded(now), clock: problem.session ?? undefined, transcript: problem.chat.slice(-20).map(({ role, text }) => ({ role, text })) })}${seen(now.drawing)}`;
-      const r = await ask({ ...tutor, prompt, images: now.drawing ? [now.drawing.png] : [], schema: chatSchema, signal: job.signal });
+${data({ problem: { title: problem.title, subject: problem.subject, ...known(problem.body) }, candidate_work: worded(now), clock: problem.session ?? undefined, ai_assistant_transcript: problem.assistant?.slice(-10).map(({ role, text }) => ({ role, text })), transcript })}${seen(now.drawing)}`,
+              images: now.drawing ? [now.drawing.png] : [],
+              schema: chatSchema,
+              signal: job.signal,
+            });
       // Links come from the candidate's own words only. A page or a reply must not be able to choose what gets opened.
-      const problemId = r.new_problem.trim() ? await addProblem(setId, { request: question, guidance: dropLinks(r.new_problem), subject: '', links: findLinks(question) }) : undefined;
-      await updateProblem(setId, pid, (p) => void Object.assign(p, { chat: [...p.chat, { role: 'assistant', text: r.reply, problemId }], chatBusy: false }));
+      const problemId = r.new_problem?.trim() ? await addProblem(setId, { request: question, guidance: dropLinks(r.new_problem), subject: '', links: findLinks(question) }) : undefined;
+      await updateProblem(setId, pid, (p) => void Object.assign(p, { [channel]: [...p[channel], { role: 'assistant', text: r.reply, problemId }], [busy]: false }));
     } catch (e) {
       if (job.signal.aborted) return;
-      await updateProblem(setId, pid, (p) => void Object.assign(p, { chatBusy: false, chatError: e.message }));
+      await updateProblem(setId, pid, (p) => void Object.assign(p, { [busy]: false, [error]: e.message }));
     }
   });
 }
@@ -151,6 +169,7 @@ export async function analyze(setId, pid, body) {
     if (p.visual?.status === 'working') throw new Invalid('The drawing is already being made');
     if (p.kind === 'sql') now.language = 'sql';
     if (p.kind === 'code' && !LANGUAGES.includes(now.language)) throw new Invalid('Choose a language');
+    if (p.kind === 'project') throw new Invalid('Analysis is not available for codebase problems');
     p.visual = { ...p.visual, status: 'working', step: RUNS.includes(p.kind) ? 'Running your code' : 'Reading your work', error: '' };
   });
   draw(setId, pid, (p) => (RUNS.includes(p.kind) ? codeEvidence(p, now) : p.kind === 'ui' ? { language: 'html', code: now.code, outcome: now.outcome } : { answer: now.answer, working: now.working, outcome: now.outcome, drawing: now.drawing?.outline, correct: p.body.answer, unit: p.body.unit }), null, now.drawing);

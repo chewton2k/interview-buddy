@@ -11,7 +11,7 @@ import { tags as t } from '@lezer/highlight';
 import { basicSetup } from 'codemirror';
 import { useEffect, useRef } from 'preact/hooks';
 
-const MODES = { python, javascript, cpp, html, sql: () => sql({ dialect: SQLite }) };
+const MODES = { python, javascript, cpp, html, sql: () => sql({ dialect: SQLite }), plain: () => [] };
 const style = HighlightStyle.define([
   { tag: [t.keyword, t.operatorKeyword, t.definitionKeyword, t.modifier, t.self, t.bool, t.null, t.atom], color: 'var(--code-keyword)' },
   { tag: [t.controlKeyword, t.moduleKeyword], color: 'var(--code-control)' },
