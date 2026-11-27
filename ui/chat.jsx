@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { api, Icon, Problem, Prose, useAction } from './lib.jsx';
 
-export function Chat({ setId, problem, at, work, reload, onClose, presence, head, channel = 'chat', fields, extra, title = 'Ask', intro = 'Ask about the problem, your approach or a hint. It can see your current work. You can also paste a link and ask for a new problem.', placeholder = 'Ask anything about this problem' }) {
+export function Chat({ setId, problem, at, work, reload, onClose, presence, head, channel = 'chat', fields, extra, note, title = 'Ask', intro = 'Ask about the problem, your approach or a hint. It can see your current work. You can also paste a link and ask for a new problem.', placeholder = 'Ask anything about this problem' }) {
   const [text, setText] = useState('');
   const end = useRef();
   const list = problem[channel] ?? [];
@@ -30,6 +30,7 @@ export function Chat({ setId, problem, at, work, reload, onClose, presence, head
         {list.map((m, i) => (
           <div key={i} class={`said ${m.role}`}>
             <span class="sr">{m.role === 'user' ? 'You' : 'Reply'}</span>
+            {m.selection && <span class="small second mono">{m.selection.path} lines {m.selection.from}-{m.selection.to}</span>}
             <Prose text={m.text} />
             {extra?.(m)}
             {m.problemId && (
@@ -55,6 +56,7 @@ export function Chat({ setId, problem, at, work, reload, onClose, presence, head
         <div ref={end} />
       </div>
       <Problem>{send.error}</Problem>
+      {note}
       <form
         class="ask"
         onSubmit={(e) => {

@@ -4,7 +4,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkNumber } from './answers.js';
-import { addMore, addProblem, checkRequest, createSet, grade, GROUPS, LEVELS, personalSet, PROJECT_LIMIT, retryProblem, retrySet, stopSet } from './generate.js';
+import { addMore, addProblem, checkRequest, createSet, grade, GROUPS, LEVELS, partCount, personalSet, PROJECT_LIMIT, retryProblem, retrySet, stopSet } from './generate.js';
 import { fits, same, starter } from './harness.js';
 import { findLinks } from './link.js';
 import { ping, ProviderError, providerStatus } from './providers.js';
@@ -219,6 +219,15 @@ const routes = [
   }],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/run$/, ([id, pid], body) => runFor(id, pid, body, true)],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/project\/(main|tests)$/, ([id, pid, mode], body) => runCodebase(id, pid, body, mode)],
+  ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/part$/, async ([id, pid]) => {
+    kindOnly(await readyProblem(id, pid), 'project');
+    await updateProblem(id, pid, (p) => {
+      const shown = p.reveal?.shown ?? 1;
+      if (shown >= partCount(p.body.statement)) throw new Invalid('This is the last part');
+      p.reveal = { shown: shown + 1, from: p.reveal?.from ?? p.session?.startedAt ?? new Date().toISOString(), at: [...(p.reveal?.at ?? []), new Date().toISOString()] };
+    });
+    return {};
+  }],
   ['POST', /^\/api\/sets\/([^/]+)\/problems\/([^/]+)\/edits$/, async ([id, pid], body) => {
     if (!['accepted', 'rejected'].includes(body.status)) throw new Invalid('Choose accepted or rejected');
     await updateProblem(id, pid, (p) => {
@@ -250,7 +259,8 @@ const routes = [
     if (body.action === 'start' && ![30, 45, 60].includes(body.minutes)) throw new Invalid('Choose 30, 45 or 60 minutes');
     await updateProblem(id, pid, (p) => {
       const now = new Date().toISOString();
-      if (body.action === 'start') p.session = { startedAt: now, endedAt: null, minutes: body.minutes };
+      // A new attempt starts again from the first part.
+      if (body.action === 'start') Object.assign(p, { session: { startedAt: now, endedAt: null, minutes: body.minutes }, reveal: null });
       else if (body.action === 'clear') p.session = null;
       else p.session = { ...(p.session ?? { startedAt: null, minutes: null }), endedAt: p.session?.endedAt ?? now };
     });

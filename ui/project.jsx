@@ -43,20 +43,29 @@ function Tree({ files, open, onOpen, changed }) {
   return <ul class="tree" aria-label="Files">{rows}</ul>;
 }
 
-function Edit({ edit, files, onPick, busy }) {
-  const before = edit.path in files ? files[edit.path] : null;
-  const lines = diffLines(before, edit.content);
+function FileDiff({ path, before, after, lines: show = true, children }) {
+  const lines = diffLines(before, after);
   const [added, removed] = ['+', '-'].map((op) => lines.filter((l) => l.op === op).length);
   return (
     <div class="change">
       <div class="row between wrap">
-        <span class="mono small">{edit.path}{before === null && <span class="second"> new file</span>}</span>
+        <span class="mono small">{path}{before === null && <span class="second"> new file</span>}</span>
         <span class="small"><span class="good">+{added}</span> <span class="bad">-{removed}</span></span>
       </div>
-      {/* Once chosen, the file has moved on, so the diff against it would no longer mean anything. */}
-      {edit.status === 'pending' && <pre class="diff" aria-label={`Changes to ${edit.path}`}>
-        {fold(lines).map((l, k) => (l.skip ? <span key={k} class="skip">{l.skip} unchanged {l.skip === 1 ? 'line' : 'lines'}</span> : <span key={k} class={l.op === '+' ? 'add' : l.op === '-' ? 'del' : ''}><i aria-hidden="true">{l.op}</i><span class="sr">{l.op === '+' ? 'Added: ' : l.op === '-' ? 'Removed: ' : ''}</span>{l.t || ' '}</span>))}
-      </pre>}
+      {show && (
+        <pre class="diff" aria-label={`Changes to ${path}`}>
+          {fold(lines).map((l, k) => (l.skip ? <span key={k} class="skip">{l.skip} unchanged {l.skip === 1 ? 'line' : 'lines'}</span> : <span key={k} class={l.op === '+' ? 'add' : l.op === '-' ? 'del' : ''}><i aria-hidden="true">{l.op}</i><span class="sr">{l.op === '+' ? 'Added: ' : l.op === '-' ? 'Removed: ' : ''}</span>{l.t || ' '}</span>))}
+        </pre>
+      )}
+      {children}
+    </div>
+  );
+}
+
+function Edit({ edit, files, onPick, busy }) {
+  // Once chosen, the file has moved on, so the diff against it would no longer mean anything.
+  return (
+    <FileDiff path={edit.path} before={edit.path in files ? files[edit.path] : null} after={edit.content} lines={edit.status === 'pending'}>
       {edit.status === 'pending' ? (
         <div class="row">
           <button class="btn" disabled={busy} onClick={() => onPick(edit, 'accepted')}><Icon name="check" />Accept</button>
@@ -65,7 +74,26 @@ function Edit({ edit, files, onPick, busy }) {
       ) : (
         <p class={`small ${edit.status === 'accepted' ? 'good' : 'second'}`}>{edit.status === 'accepted' ? 'Accepted' : 'Rejected'}</p>
       )}
-    </div>
+    </FileDiff>
+  );
+}
+
+const PART = /(?=\*\*Part \d+[:.]?\*\*)/;
+function Statement({ statement, shown, onNext, busy }) {
+  const [intro, ...parts] = statement.trimStart().startsWith('**Part') ? ['', ...statement.split(PART)] : statement.split(PART);
+  return (
+    <>
+      {intro && <Prose text={intro} />}
+      {parts.slice(0, shown).map((p, i) => <Prose key={i} text={p} />)}
+      {shown < parts.length && (
+        <div class="stack tight">
+          <p class="small second">Part {shown + 1} of {parts.length} opens when you are ready, usually when your interviewer moves you on.</p>
+          <div>
+            <button class="btn" disabled={busy} onClick={onNext}>Next part</button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -92,6 +120,7 @@ export function Project({ set, problem, at, load }) {
   const [left, setLeft] = useState(draft.files ? 'files' : 'instructions');
   const [right, setRight] = useState(problem.session?.endedAt ? 'review' : 'terminal');
   const [talk, setTalk] = useState('chat');
+  const [selection, setSelection] = useState(null);
   const [mode, setMode] = useState(() => {
     try {
       return localStorage.getItem('assistant-mode') === 'ask' ? 'ask' : 'edit';
@@ -145,6 +174,7 @@ export function Project({ set, problem, at, load }) {
       if (Object.keys(files).some((f) => f.startsWith(`${edit.path}/`) || edit.path.startsWith(`${f}/`))) return alert(`${edit.path} clashes with a file or folder that is already there.`);
       change({ ...files, [edit.path]: edit.content }, edit.path);
       setResets((r) => r + 1);
+      setSelection(null);
     }
     await api('POST', `${at}/edits`, { id: edit.id, status });
     await load();
@@ -153,6 +183,10 @@ export function Project({ set, problem, at, load }) {
     setMode(m);
     remember('assistant-mode', m);
   };
+  const next = useAction(async () => {
+    await api('POST', `${at}/part`, {});
+    await load();
+  });
   const busy = exec.busy || finish.busy;
 
   const create = () => {
@@ -162,6 +196,7 @@ export function Project({ set, problem, at, load }) {
     if (Object.keys(files).some((f) => f.startsWith(`${p}/`) || p.startsWith(`${f}/`))) return alert(`${p} clashes with a file or folder that is already there.`);
     change(p in files ? files : { ...files, [p]: '' }, p);
     setResets(resets + 1);
+    setSelection(null);
     setLeft('files');
   };
   const reset = () => {
@@ -172,8 +207,10 @@ export function Project({ set, problem, at, load }) {
       change(rest, 'main.py' in rest ? 'main.py' : Object.keys(rest)[0]);
     } else change({ ...files, [open]: body.files[open] });
     setResets(resets + 1);
+    setSelection(null);
   };
   const pick = (p) => {
+    setSelection(null);
     setOpen(p);
     save({ files, open: p });
   };
@@ -217,7 +254,8 @@ export function Project({ set, problem, at, load }) {
           <div class="stack">
             <h1>{problem.title}</h1>
             <Source set={set} problem={problem} />
-            <Prose text={body.statement} />
+            <Statement statement={body.statement} shown={ended ? Infinity : problem.reveal?.shown ?? 1} onNext={() => next.run()} busy={next.busy} />
+            <Problem>{next.error}</Problem>
             <p class="small second">Python 3 with the standard library. Run main runs main.py, Run tests runs everything in tests/. Hidden tests run when you finish.</p>
           </div>
         ) : (
@@ -239,7 +277,7 @@ export function Project({ set, problem, at, load }) {
             Run main
           </button>
         </div>
-        <Editor key={`${open} ${resets}`} language={modeOf(open)} value={files[open] ?? ''} onChange={(text) => change({ ...files, [open]: text })} onRun={() => !busy && exec.run('main')} />
+        <Editor key={`${open} ${resets}`} language={modeOf(open)} value={files[open] ?? ''} onChange={(text) => change({ ...files, [open]: text })} onRun={() => !busy && exec.run('main')} onSelect={(s) => setSelection(s && { ...s, path: open })} />
       </section>
       <Splitter name="terminal" side="right" width={rightWidth} onWidth={(w) => (setRightWidth(w), remember('pad-right', w))} />
 
@@ -275,6 +313,14 @@ export function Project({ set, problem, at, load }) {
                 )}
                 <Feedback feedback={feedback} />
                 {(ended || review) && (
+                  <details>
+                    <summary>Your changes</summary>
+                    <div class="stack tight">
+                      {Object.keys(files).filter(changed).length ? Object.keys(files).filter(changed).map((p) => <FileDiff key={p} path={p} before={p in body.files ? body.files[p] : null} after={files[p]} />) : <p class="second">You did not change any files.</p>}
+                    </div>
+                  </details>
+                )}
+                {(ended || review) && (
                   <div>
                     {body.hints.map((h, i) => (
                       <details key={i}>
@@ -300,7 +346,12 @@ export function Project({ set, problem, at, load }) {
             )}
           </div>
         </section>
-        <Chat key={talk} presence={talk === 'chat'} head={talk === 'chat' ? head : <>{head}{modes}</>} channel={talk} fields={{ mode }} extra={(m) => m.edits?.map((e) => <Edit key={e.id} edit={e} files={files} onPick={decide.run} busy={decide.busy} />)} title={talk === 'chat' ? 'Interviewer' : 'AI assistant'} intro={talk === 'chat' ? INTRO : HELPER[mode]} placeholder={talk === 'chat' ? 'Talk to your interviewer' : mode === 'edit' ? 'Ask the assistant to change code' : 'Ask the AI assistant'} setId={set.id} problem={problem} at={at} work={work} reload={load} />
+        <Chat key={talk} presence={talk === 'chat'} head={talk === 'chat' ? head : <>{head}{modes}</>} channel={talk} fields={{ mode, selection: selection ?? undefined }} note={selection && (
+          <p class="selnote small">
+            <span><span class="mono">{selection.path} lines {selection.from}-{selection.to}</span> is selected and goes with your message</span>
+            <button class="btn bare" aria-label="Do not send the selection" onClick={() => setSelection(null)}><Icon name="x" /></button>
+          </p>
+        )} extra={(m) => m.edits?.map((e) => <Edit key={e.id} edit={e} files={files} onPick={decide.run} busy={decide.busy} />)} title={talk === 'chat' ? 'Interviewer' : 'AI assistant'} intro={talk === 'chat' ? INTRO : HELPER[mode]} placeholder={talk === 'chat' ? 'Talk to your interviewer' : mode === 'edit' ? 'Ask the assistant to change code' : 'Ask the AI assistant'} setId={set.id} problem={problem} at={at} work={work} reload={load} />
       </div>
     </div>
   );

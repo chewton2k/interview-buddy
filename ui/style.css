@@ -169,6 +169,8 @@ a.item:hover, .over .item { background: var(--well); }
 .diff .add i { color: var(--good); }
 .diff .del i { color: var(--bad); }
 .diff .skip { color: var(--muted); padding: 2px 8px 2px 20px; font-size: 12px; }
+.selnote { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; padding: 4px 4px 4px 12px; border-radius: 8px; background: var(--raised); color: var(--second); }
+.said.user > .mono { justify-self: end; }
 .testlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 14px; line-height: 20px; }
 .testlist li { display: flex; gap: 8px; align-items: flex-start; }
 .testlist .mono { color: var(--text); overflow-wrap: anywhere; }

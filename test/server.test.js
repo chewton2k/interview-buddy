@@ -357,6 +357,25 @@ test('a codebase problem runs main and tests, keeps an assistant transcript and 
   assert.match(calls().at(-1).prompt, /Proposed edits: shop\/tally\.py accepted, notes\.md rejected/);
   assert.match(calls()[0].prompt, /Edit mode/);
 
+  // Parts open one at a time, a new attempt starts from the first, and the interviewer knows which part is open.
+  const parted = 'Intro.\n\n**Part 1**: fix.\n\n**Part 2**: extend.';
+  const { updateProblem } = await import('../src/store.js');
+  await updateProblem(id, set.problems[0].id, (q) => void (q.body.statement = parted));
+  assert.equal((await call('POST', `${at}/session`, { action: 'start', minutes: 60 })).status, 200);
+  assert.equal((await call('POST', `${at}/part`, {})).status, 200);
+  assert.equal((await ready(id)).problems[0].reveal.shown, 2);
+  assert.equal((await call('POST', `${at}/part`, {})).status, 400);
+  replies([{ match: 'AI-native coding interview', reply: { reply: 'Go on.', new_problem: '' } }]);
+  clearCalls();
+  await call('POST', `${at}/chat`, { message: 'what about this?', code: '### shop/tally.py', selection: { path: 'shop/tally.py', from: 7, to: 8, text: 'def total(orders):' } });
+  for (let i = 0; (await ready(id)).problems[0].chatBusy && i < 200; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.match(calls()[0].prompt, /"current_part": "2 of 2"/);
+  assert.match(calls()[0].prompt, /def total\(orders\):/);
+  assert.deepEqual((await ready(id)).problems[0].chat.at(-2).selection, { path: 'shop/tally.py', from: 7, to: 8 });
+  for (const bad of [{ path: '../x', from: 1, to: 1, text: 'x' }, { path: 'a.py', from: 3, to: 1, text: 'x' }]) assert.equal((await call('POST', `${at}/chat`, { message: 'x', selection: bad })).status, 400);
+  await call('POST', `${at}/session`, { action: 'start', minutes: 60 });
+  assert.equal((await ready(id)).problems[0].reveal, null);
+
   await call('PUT', `${at}/draft`, { files: fixed, open: 'shop/tally.py' });
   assert.equal((await ready(id)).problems[0].draft.open, 'shop/tally.py');
   assert.equal((await call('POST', `${at}/session`, { action: 'start', minutes: 60 })).status, 200);

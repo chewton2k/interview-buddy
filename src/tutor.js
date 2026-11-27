@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { addProblem, data, obj, PROJECT_LIMIT, said, str, tracked } from './generate.js';
+import { addProblem, data, obj, partCount, partTimes, PROJECT_LIMIT, said, str, tracked } from './generate.js';
 import { dropLinks, findLinks } from './link.js';
 import { ask, ProviderError } from './providers.js';
 import { LANGUAGES, plainPath, runCode } from './sandbox.js';
@@ -24,12 +24,18 @@ const find = async (setId, pid) => {
   return { set, problem: set.problems.find((p) => p.id === pid) };
 };
 
+const picked = (s) => {
+  if (s === undefined || s === null) return null;
+  if (!plainPath(s.path) || !Number.isInteger(s.from) || !Number.isInteger(s.to) || s.from < 1 || s.to < s.from) throw new Invalid('The selection could not be read');
+  return { path: s.path, from: s.from, to: s.to, text: need(s.text, 'Selected code', 20000) };
+};
+
 const PARTNER = `You are the candidate's interview partner for one practice problem. Answer their last message in the transcript.
 Be direct and concrete, refer to what they actually wrote, and keep to what was asked. Nudge rather than hand over the full solution unless they ask for it.`;
 const INTERVIEWER = `You are the interviewer in a live technical interview in a shared coding pad. You see the candidate's code and what their last run printed. Answer their last message in the transcript.
 Behave like a good human interviewer. Keep replies under 90 words. Ask at most one question at a time. Answer clarifying questions about the problem plainly. When they describe an approach, probe its edge cases and its time and space cost before they build it. When they are stuck or ask for help, give the smallest useful nudge. When their code works, ask for tests they would add, then a follow-up that changes a constraint. Never write the solution, name the full algorithm outright or fix their code for them. If they ask for the solution, say it opens when they finish the interview.`;
 const PROJECT_INTERVIEWER = `You are the interviewer in a live AI-native coding interview. The candidate works in a multi-file codebase in a shared IDE with an AI assistant they are expected to use, and you see their files, what their last run printed and their recent messages to the assistant. Answer their last message in the transcript.
-Behave like a good human interviewer. Keep replies under 90 words. Ask at most one question at a time. Answer clarifying questions about the task plainly. Ask them to explain existing code and any code the assistant wrote before they rely on it, how they verified a change, which tests or edge cases they would add, and the runtime or trade-offs of their approach. When a part works, move them on to the next part of the statement. If they paste or accept assistant output without reading or running it, ask how they know it is right. Never write the solution, point at the exact bug or fix their code for them. If they ask for the solution, say it opens when they finish the interview.`;
+Behave like a good human interviewer. Keep replies under 90 words. Ask at most one question at a time. Answer clarifying questions about the task plainly. Ask them to explain existing code and any code the assistant wrote before they rely on it, how they verified a change, which tests or edge cases they would add, and the runtime or trade-offs of their approach. They see the statement only up to current_part. Never describe a later part. When the current part works and they have explained it, tell them to press Next part. When they select code, selected_code is what they mean. If they paste or accept assistant output without reading or running it, ask how they know it is right. Never write the solution, point at the exact bug or fix their code for them. If they ask for the solution, say it opens when they finish the interview.`;
 const ASSISTANT = `You are the AI coding assistant built into the candidate's IDE. You see every file in their project and what their last run printed. Answer their last message in the transcript like a capable coding assistant: explain code, trace bugs, propose changes, and write code or tests when asked. Be concise. Say when you are unsure, and never claim you ran anything.`;
 const chatSchema = obj({ reply: str, new_problem: str });
 const list = (items) => ({ type: 'array', items });
@@ -46,6 +52,7 @@ export async function chat(setId, pid, body) {
   // The assistant is its own transcript, so the interviewer and the grader can see how it was used.
   const channel = body.channel === 'assistant' ? 'assistant' : 'chat';
   const mode = body.mode === 'edit' ? 'edit' : 'ask';
+  const selection = picked(body.selection);
   const [busy, error] = [`${channel}Busy`, `${channel}Error`];
   const question = await updateProblem(setId, pid, (p) => {
     ready(p);
@@ -57,7 +64,7 @@ export async function chat(setId, pid, body) {
       if (last?.role !== 'user') throw new Invalid('There is nothing to send again');
     } else {
       if (!message) throw new Invalid('Write a message first');
-      p[channel] = [...p[channel], { role: 'user', text: message }].slice(-100);
+      p[channel] = [...p[channel], { role: 'user', text: message, ...(selection && { selection: { path: selection.path, from: selection.from, to: selection.to } }) }].slice(-100);
     }
     Object.assign(p, { [busy]: true, [error]: '' });
     return p[channel].at(-1).text;
@@ -70,12 +77,12 @@ export async function chat(setId, pid, body) {
       const live = !problem.session?.endedAt;
       const r =
         channel === 'assistant'
-          ? await ask({ ...tutor, prompt: `${ASSISTANT} ${MODES[mode]} Use Markdown.\n${data({ project: now.code, last_run: now.outcome, transcript })}`, schema: assistantSchema[mode], signal: job.signal })
+          ? await ask({ ...tutor, prompt: `${ASSISTANT} ${MODES[mode]} Use Markdown.\n${data({ project: now.code, last_run: now.outcome, selected_code: selection ?? undefined, transcript })}`, schema: assistantSchema[mode], signal: job.signal })
           : await ask({
               ...tutor,
               prompt: `${problem.kind === 'project' && live ? PROJECT_INTERVIEWER : RUNS.includes(problem.kind) && live ? INTERVIEWER : PARTNER} Use Markdown, with $...$ for math and fenced code where it helps. Never write a dollar sign for money.
 new_problem is an empty string unless the candidate asks you to make a new practice problem, for example from a link, an idea or as a variation of this one. Then describe the problem to write in a few self-contained sentences, with no links, and say in reply that it is being made. The app opens links the candidate pasted.
-${data({ problem: { title: problem.title, subject: problem.subject, ...known(problem.body) }, candidate_work: worded(now), clock: problem.session ?? undefined, ai_assistant_transcript: problem.assistant?.slice(-10).map(said), transcript })}${seen(now.drawing)}`,
+${data({ problem: { title: problem.title, subject: problem.subject, ...known(problem.body) }, candidate_work: worded(now), selected_code: selection ?? undefined, clock: problem.session ?? undefined, ...(problem.kind === 'project' && partCount(problem.body.statement) && { current_part: `${problem.reveal?.shown ?? 1} of ${partCount(problem.body.statement)}`, parts_opened: partTimes(problem) }), ai_assistant_transcript: problem.assistant?.slice(-10).map(said), transcript })}${seen(now.drawing)}`,
               images: now.drawing ? [now.drawing.png] : [],
               schema: chatSchema,
               signal: job.signal,

@@ -50,10 +50,10 @@ const brackets = ViewPlugin.fromClass(
 );
 
 /** Remount with a new `key` to load different text. */
-export function Editor({ language, value, onChange, onRun, readOnly }) {
+export function Editor({ language, value, onChange, onRun, onSelect, readOnly }) {
   const host = useRef();
   const latest = useRef({});
-  latest.current = { onChange, onRun };
+  latest.current = { onChange, onRun, onSelect };
   useEffect(() => {
     const run = () => (latest.current.onRun(), true);
     let view;
@@ -74,7 +74,13 @@ export function Editor({ language, value, onChange, onRun, readOnly }) {
           brackets,
           readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [],
           EditorView.contentAttributes.of({ 'aria-label': readOnly ? 'Solution code' : 'Code editor. Press Escape then Tab to leave.' }),
-          EditorView.updateListener.of((u) => u.docChanged && latest.current.onChange(u.state.doc.toString())),
+          EditorView.updateListener.of((u) => {
+            if (u.docChanged) latest.current.onChange(u.state.doc.toString());
+            if (u.selectionSet && latest.current.onSelect) {
+              const { from, to } = u.state.selection.main;
+              latest.current.onSelect(from === to ? null : { from: u.state.doc.lineAt(from).number, to: u.state.doc.lineAt(to).number, text: u.state.sliceDoc(from, to) });
+            }
+          }),
         ],
       }),
     });
