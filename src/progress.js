@@ -48,7 +48,7 @@ export async function buildReport(signal) {
     difficulty: p.difficulty,
     title: p.title,
     topic: cut(p.topic ?? '', 400),
-    result: p.progress ?? 'graded only',
+    result: p.progress === 'open' ? 'graded only' : p.progress,
     feedback: p.feedback && {
       score: p.feedback.score,
       summary: cut(p.feedback.summary, 600),
